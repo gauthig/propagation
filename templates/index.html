@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>HF Propagation</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div id="map"></div>
+    <div class="controls">
+        <button id="band-toggle">20m/40m</button>
+        <button id="refresh-now">Refresh Now</button>
+        <div id="indices">
+            SFI: {{ solar_indices['SFI'] }}<br>
+            K-index: {{ solar_indices['K-index'] }}<br>
+            A-index: {{ solar_indices['A-index'] }}<br>
+            Sunspot Number: {{ solar_indices['Sunspot Number'] }}<br>
+            Last Updated: {{ last_update_time }}
+        </div>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="{{ url_for('static', filename='main.js') }}"></script>
+</body>
+</html>
