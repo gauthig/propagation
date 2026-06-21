@@ -1,25 +1,899 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>HF Propagation</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HF Propagation</title>
+  <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/d3-geo-projection@4/dist/d3-geo-projection.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden;
+      font-family:'Segoe UI',Arial,sans-serif; background:#0d1117; }
+
+    /* ── Map layers ─────────────────────────────────────────── */
+    #map-wrap { position:absolute; inset:0; }
+    #worldmap  { position:absolute; inset:0; width:100%; height:100%; }
+    #heat-canvas { position:absolute; inset:0; pointer-events:none;
+                   opacity:0.85; filter:blur(9px); }
+
+    /* ── Panel ──────────────────────────────────────────────── */
+    #panel {
+      position:absolute; top:12px; left:12px; z-index:1000;
+      background:rgba(10,14,22,0.92); backdrop-filter:blur(8px);
+      border:1px solid rgba(255,255,255,0.10); border-radius:10px;
+      width:252px; color:#e2e8f0; box-shadow:0 4px 24px rgba(0,0,0,0.6);
+      max-height:calc(100vh - 24px); overflow-y:auto;
+      scrollbar-width:thin; scrollbar-color:#334155 transparent;
+    }
+    #panel-header {
+      display:flex; align-items:center; justify-content:space-between;
+      padding:12px 14px 8px;
+      border-bottom:1px solid rgba(255,255,255,0.07);
+      position:sticky; top:0; background:rgba(10,14,22,0.97); z-index:1;
+      border-radius:10px 10px 0 0;
+    }
+    #panel-header h1 {
+      font-size:0.88rem; font-weight:700; letter-spacing:0.05em;
+      color:#38bdf8; margin:0; text-transform:uppercase;
+    }
+    #hamburger {
+      background:none; border:1px solid #334155; color:#94a3b8;
+      font-size:1rem; cursor:pointer; padding:3px 7px; border-radius:5px;
+      line-height:1; transition:all 0.15s; flex-shrink:0;
+    }
+    #hamburger:hover { border-color:#38bdf8; color:#38bdf8; }
+    #panel-body { padding:12px 14px 14px; }
+    #panel-body.collapsed { display:none; }
+
+    /* Band dropdown */
+    .field-row { display:flex; align-items:center; gap:8px; margin-bottom:12px; }
+    .field-label { font-size:0.7rem; color:#64748b; text-transform:uppercase;
+                   letter-spacing:0.05em; white-space:nowrap; }
+    #band-select {
+      flex:1; background:rgba(255,255,255,0.06); border:1px solid #334155;
+      border-radius:6px; color:#e2e8f0; font-size:0.82rem; padding:5px 8px;
+      cursor:pointer; outline:none; font-family:inherit;
+    }
+    #band-select:focus { border-color:#38bdf8; }
+    #band-select option { background:#1e293b; }
+
+    /* Solar index grid */
+    .idx-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px; }
+    .idx-card {
+      background:rgba(255,255,255,0.05); border-radius:6px; padding:6px 10px;
+      text-align:center; cursor:default; border:1px solid transparent;
+      transition:border-color 0.15s;
+    }
+    .idx-card:hover { border-color:rgba(56,189,248,0.35); }
+    .idx-label { font-size:0.62rem; text-transform:uppercase; letter-spacing:0.06em;
+                 color:#64748b; display:block; margin-bottom:2px; }
+    .idx-value { font-size:1.1rem; font-weight:700; color:#e2e8f0; }
+
+    /* Band conditions table */
+    .bc-table { width:100%; border-collapse:collapse; font-size:0.68rem; margin-bottom:10px; }
+    .bc-table th { color:#475569; text-transform:uppercase; font-size:0.58rem;
+                   letter-spacing:0.05em; padding:3px 4px; text-align:left;
+                   border-bottom:1px solid rgba(255,255,255,0.06); }
+    .bc-table td { padding:3px 4px; vertical-align:middle; }
+    .bc-band { color:#94a3b8; }
+    .cond-pill { padding:1px 6px; border-radius:10px; font-weight:700;
+                 font-size:0.62rem; text-transform:uppercase; letter-spacing:0.04em; display:inline-block; }
+    .cond-Good    { background:rgba(34,197,94,0.18);  color:#4ade80; border:1px solid #166534; }
+    .cond-Fair    { background:rgba(234,179,8,0.18);  color:#fbbf24; border:1px solid #713f12; }
+    .cond-Poor    { background:rgba(239,68,68,0.18);  color:#f87171; border:1px solid #7f1d1d; }
+    .cond-Unknown { background:rgba(100,116,139,0.18);color:#94a3b8; border:1px solid #334155; }
+
+    .divider { border:none; border-top:1px solid rgba(255,255,255,0.07); margin:10px 0; }
+    .section-label { font-size:0.62rem; color:#475569; text-transform:uppercase;
+                     letter-spacing:0.05em; margin-bottom:6px; }
+
+    /* Refresh / status */
+    #refresh-btn {
+      width:100%; padding:7px 0; border:1px solid #334155;
+      background:rgba(255,255,255,0.04); color:#94a3b8; font-size:0.78rem;
+      border-radius:6px; cursor:pointer; transition:all 0.18s; margin-bottom:8px;
+      font-family:inherit;
+    }
+    #refresh-btn:hover:not(:disabled) { border-color:#38bdf8; color:#38bdf8; background:rgba(56,189,248,0.08); }
+    #refresh-btn:disabled { opacity:0.45; cursor:default; }
+    #status { font-size:0.63rem; color:#475569; text-align:center; line-height:1.4; }
+    #status.stale { color:#f87171; }
+
+    /* QTH section */
+    .method-group { display:flex; gap:4px; margin-bottom:8px; }
+    .method-btn {
+      flex:1; padding:4px 0; border:1px solid #334155; background:transparent;
+      color:#64748b; font-size:0.72rem; border-radius:4px; cursor:pointer;
+      transition:all 0.15s; font-family:inherit;
+    }
+    .method-btn.active { border-color:#38bdf8; background:rgba(56,189,248,0.12); color:#38bdf8; }
+    .method-btn:hover:not(.active) { border-color:#475569; color:#94a3b8; }
+    .qth-input {
+      width:100%; background:rgba(255,255,255,0.05); border:1px solid #334155;
+      border-radius:4px; color:#e2e8f0; font-size:0.78rem; padding:5px 8px;
+      margin-bottom:4px; outline:none; font-family:inherit;
+    }
+    .qth-input:focus { border-color:#38bdf8; }
+    .qth-input::placeholder { color:#475569; }
+    .ll-row { display:flex; gap:4px; }
+    .ll-row .qth-input { margin-bottom:0; }
+    #set-qth-btn {
+      width:100%; padding:6px 0; border:1px solid #38bdf8;
+      background:rgba(56,189,248,0.10); color:#38bdf8; font-size:0.78rem;
+      border-radius:4px; cursor:pointer; margin-top:6px; transition:all 0.15s;
+      font-family:inherit;
+    }
+    #set-qth-btn:hover:not(:disabled) { background:rgba(56,189,248,0.22); }
+    #set-qth-btn:disabled { opacity:0.45; cursor:default; }
+    #qth-status-line { font-size:0.63rem; margin-top:5px; min-height:1em;
+                       word-break:break-all; line-height:1.4; }
+
+    /* ── Tooltip ────────────────────────────────────────────── */
+    #tip-box {
+      position:fixed; z-index:9999; pointer-events:none; display:none;
+      background:rgba(8,12,20,0.97); border:1px solid #38bdf8; border-radius:8px;
+      padding:10px 13px; max-width:270px; color:#e2e8f0; font-size:0.73rem;
+      line-height:1.55; box-shadow:0 8px 32px rgba(0,0,0,0.6);
+    }
+    #tip-box strong { display:block; color:#38bdf8; margin-bottom:6px; font-size:0.78rem; }
+    #tip-box ul { margin:0; padding-left:14px; }
+    #tip-box li { color:#94a3b8; margin-bottom:2px; }
+    #tip-box li b { color:#e2e8f0; }
+
+    /* ── Legend ─────────────────────────────────────────────── */
+    #legend {
+      position:absolute; bottom:28px; right:12px; z-index:1000;
+      background:rgba(10,14,22,0.90); backdrop-filter:blur(6px);
+      border:1px solid rgba(255,255,255,0.10); border-radius:8px;
+      padding:10px 14px; color:#94a3b8; font-size:0.7rem;
+    }
+    #legend strong { display:block; color:#e2e8f0; font-size:0.72rem;
+                     margin-bottom:6px; letter-spacing:0.04em; text-transform:uppercase; }
+    .legend-bar { width:140px; height:12px; border-radius:4px;
+      background:linear-gradient(to right,#660000,#cc2200 25%,#ff8800 50%,#ffdd00 75%,#00ff44 100%);
+      margin-bottom:4px; }
+    .legend-labels { display:flex; justify-content:space-between; color:#64748b; }
+    .legend-row { margin-top:7px; color:#64748b; display:flex; align-items:center; gap:6px; }
+
+    /* ── Loading overlay ────────────────────────────────────── */
+    #loading {
+      position:absolute; inset:0; z-index:2000; background:rgba(10,14,22,0.82);
+      display:flex; flex-direction:column; align-items:center; justify-content:center;
+      color:#38bdf8; gap:14px; transition:opacity 0.4s;
+    }
+    #loading.hidden { opacity:0; pointer-events:none; }
+    .spinner { width:40px; height:40px; border:3px solid rgba(56,189,248,0.2);
+               border-top-color:#38bdf8; border-radius:50%;
+               animation:spin 0.8s linear infinite; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    #loading-msg { font-size:0.9rem; letter-spacing:0.04em; text-align:center; padding:0 20px; }
+  </style>
 </head>
 <body>
-    <div id="map"></div>
-    <div class="controls">
-        <button id="band-toggle">20m/40m</button>
-        <button id="refresh-now">Refresh Now</button>
-        <div id="indices">
-            SFI: {{ solar_indices['SFI'] }}<br>
-            K-index: {{ solar_indices['K-index'] }}<br>
-            A-index: {{ solar_indices['A-index'] }}<br>
-            Sunspot Number: {{ solar_indices['Sunspot Number'] }}<br>
-            Last Updated: {{ last_update_time }}
-        </div>
+
+<div id="map-wrap">
+  <svg id="worldmap"></svg>
+  <canvas id="heat-canvas"></canvas>
+</div>
+
+<!-- ── Floating panel ──────────────────────────────────────── -->
+<div id="panel">
+  <div id="panel-header">
+    <h1>HF Propagation</h1>
+    <button id="hamburger" onclick="togglePanel()" title="Collapse / expand panel">☰</button>
+  </div>
+
+  <div id="panel-body">
+
+    <!-- Band selector -->
+    <div class="field-row">
+      <span class="field-label">Band</span>
+      <select id="band-select" onchange="loadBand(this.value)">
+        <option value="80m">80m  (3.5 – 4.0 MHz)</option>
+        <option value="60m">60m  (5.3 – 5.4 MHz)</option>
+        <option value="40m">40m  (7.0 – 7.3 MHz)</option>
+        <option value="20m" selected>20m (14.0 – 14.35 MHz)</option>
+        <option value="17m">17m (18.07 – 18.17 MHz)</option>
+        <option value="15m">15m (21.0 – 21.45 MHz)</option>
+        <option value="10m">10m (28.0 – 29.7 MHz)</option>
+      </select>
     </div>
 
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <script src="{{ url_for('static', filename='main.js') }}"></script>
+    <!-- Solar indices (hover for explanation) -->
+    <div class="section-label">Solar Indices <span style="color:#334155;font-size:0.58rem">— hover for details</span></div>
+    <div class="idx-grid">
+      <div class="idx-card" onmouseenter="showTip(event,'sfi')" onmousemove="moveTip(event)" onmouseleave="hideTip()">
+        <span class="idx-label">Solar Flux</span><span class="idx-value" id="val-sfi">—</span>
+      </div>
+      <div class="idx-card" onmouseenter="showTip(event,'ki')"  onmousemove="moveTip(event)" onmouseleave="hideTip()">
+        <span class="idx-label">K-Index</span><span class="idx-value" id="val-ki">—</span>
+      </div>
+      <div class="idx-card" onmouseenter="showTip(event,'ai')"  onmousemove="moveTip(event)" onmouseleave="hideTip()">
+        <span class="idx-label">A-Index</span><span class="idx-value" id="val-ai">—</span>
+      </div>
+      <div class="idx-card" onmouseenter="showTip(event,'ssn')" onmousemove="moveTip(event)" onmouseleave="hideTip()">
+        <span class="idx-label">Sunspots</span><span class="idx-value" id="val-ssn">—</span>
+      </div>
+    </div>
+
+    <!-- Band conditions table -->
+    <div class="section-label">Band Conditions</div>
+    <div id="band-cond"><div style="color:#475569;font-size:0.65rem">Loading…</div></div>
+
+    <hr class="divider">
+
+    <button id="refresh-btn" onclick="manualRefresh()">Refresh Now</button>
+    <div id="status">Initializing…</div>
+
+    <!-- ── My QTH ────────────────────────────────────── -->
+    <hr class="divider">
+    <div class="section-label">My QTH</div>
+
+    <div class="method-group">
+      <button class="method-btn active" id="m-grid"   onclick="setQTHMethod('grid')">Grid</button>
+      <button class="method-btn"        id="m-latlon" onclick="setQTHMethod('latlon')">Lat/Lon</button>
+      <button class="method-btn"        id="m-zip"    onclick="setQTHMethod('zip')">ZIP</button>
+    </div>
+
+    <div id="qth-grid-input">
+      <input class="qth-input" id="inp-grid" type="text" placeholder="Maidenhead grid e.g. EM38ab"
+             onkeydown="if(event.key==='Enter') applyQTH()">
+    </div>
+    <div id="qth-ll-input" style="display:none">
+      <div class="ll-row">
+        <input class="qth-input" id="inp-lat" type="number" placeholder="Lat" step="0.001"
+               onkeydown="if(event.key==='Enter') applyQTH()">
+        <input class="qth-input" id="inp-lon" type="number" placeholder="Lon" step="0.001"
+               onkeydown="if(event.key==='Enter') applyQTH()">
+      </div>
+    </div>
+    <div id="qth-zip-input" style="display:none">
+      <input class="qth-input" id="inp-zip" type="text" placeholder="US ZIP code e.g. 90210"
+             maxlength="5" onkeydown="if(event.key==='Enter') applyQTH()">
+    </div>
+
+    <button id="set-qth-btn" onclick="applyQTH()">Set QTH</button>
+    <div id="qth-status-line" style="color:#64748b">Default: {{ default_lat }}, {{ default_lon }}</div>
+
+  </div><!-- /panel-body -->
+</div><!-- /panel -->
+
+<!-- ── Tooltip box ──────────────────────────────────────────── -->
+<div id="tip-box">
+  <strong id="tip-title"></strong>
+  <ul id="tip-lines"></ul>
+</div>
+
+<!-- ── Legend ───────────────────────────────────────────────── -->
+<div id="legend">
+  <strong>Band Openness</strong>
+  <div class="legend-bar" style="background:linear-gradient(to right,#780000,#c81e00 20%,#ff6e00 40%,#ffd200 60%,#8cff14 78%,#00dc3c 100%)"></div>
+  <div class="legend-labels"><span>Very low</span><span>Marginal</span><span>Open</span></div>
+  <div class="legend-row">
+    <svg width="22" height="10"><line x1="0" y1="5" x2="22" y2="5" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4 3"/></svg>
+    <span>Skip zone</span>
+  </div>
+  <div class="legend-row">
+    <svg width="22" height="10"><line x1="0" y1="5" x2="22" y2="5" stroke="#38bdf8" stroke-width="1.5" stroke-dasharray="4 3"/></svg>
+    <span>My QTH radius</span>
+  </div>
+</div>
+
+<!-- ── Loading overlay ──────────────────────────────────────── -->
+<div id="loading">
+  <div class="spinner"></div>
+  <div id="loading-msg">Loading propagation data…</div>
+</div>
+
+<script>
+// ── Constants ─────────────────────────────────────────────────────────────
+const DEFAULT_LAT   = {{ default_lat }};
+const DEFAULT_LON   = {{ default_lon }};
+const QTH_CIRCLE_KM = 500;   // visual radius drawn around My QTH — adjust here
+const HEAT_RADIUS   = 20;    // heatmap blob radius (px)
+const WORLD_URL     = 'https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json';
+
+// Center frequency (MHz) for each band — used for skip-zone calculation
+const BAND_FREQ = {
+  '80m': 3.750, '60m': 5.370, '40m': 7.150,
+  '20m': 14.175, '17m': 18.118, '15m': 21.225, '10m': 28.850,
+};
+
+// ── Solar index tooltip content ────────────────────────────────────────────
+const SOLAR_TIPS = {
+  sfi: {
+    title: 'Solar Flux Index (SFI)',
+    lines: [
+      '<b>What it is:</b> Solar radio emission at 10.7 cm wavelength — a proxy for ionizing radiation that creates the F2 layer.',
+      '<b>&lt; 70:</b> Very poor — upper HF bands closed',
+      '<b>70 – 100:</b> Fair — 40m/80m most reliable',
+      '<b>100 – 150:</b> Good — most HF bands usable',
+      '<b>150 – 200:</b> Very good — 10m/15m likely open',
+      '<b>&gt; 200:</b> Excellent — worldwide DX on all bands',
+    ]
+  },
+  ki: {
+    title: 'K-Index (3-hour geomagnetic)',
+    lines: [
+      '<b>What it is:</b> Short-term geomagnetic disturbance on a 0–9 scale. Disturbs the D/E layers, absorbs HF signals — especially on polar paths.',
+      '<b>0 – 1:</b> Quiet — best propagation',
+      '<b>2 – 3:</b> Unsettled — slight high-latitude degradation',
+      '<b>4:</b> Active — notable polar absorption',
+      '<b>5 – 6:</b> Minor storm — polar paths disrupted',
+      '<b>7+:</b> Major storm — HF largely unusable at high latitudes',
+    ]
+  },
+  ai: {
+    title: 'A-Index (daily geomagnetic)',
+    lines: [
+      '<b>What it is:</b> 24-hour running average of geomagnetic activity derived from K-Index readings. Slower-moving indicator of overall conditions.',
+      '<b>&lt; 8:</b> Quiet',
+      '<b>8 – 15:</b> Unsettled',
+      '<b>16 – 29:</b> Active',
+      '<b>30 – 49:</b> Minor storm',
+      '<b>50+:</b> Major storm — significant HF disruption',
+    ]
+  },
+  ssn: {
+    title: 'Sunspot Number (SSN)',
+    lines: [
+      '<b>What it is:</b> Count of sunspot groups visible on the solar disk. Correlates strongly with SFI — more sunspots = more solar UV = thicker F2 layer.',
+      '<b>&lt; 30:</b> Near solar minimum',
+      '<b>30 – 80:</b> Moderate cycle — conditions improving',
+      '<b>80 – 150:</b> Solar maximum range — best DX conditions',
+      '<b>We are in Solar Cycle 25</b>, approaching maximum (~2025–2026).',
+    ]
+  },
+};
+
+// ── Major cities ──────────────────────────────────────────────────────────
+const CITIES = [
+  // Continental US
+  {n:'New York',     lat:40.71,  lon:-74.01,  anchor:'start'},
+  {n:'Los Angeles',  lat:34.05,  lon:-118.24, anchor:'end'  },
+  {n:'Chicago',      lat:41.88,  lon:-87.63,  anchor:'start'},
+  {n:'Houston',      lat:29.76,  lon:-95.37,  anchor:'start'},
+  {n:'Phoenix',      lat:33.45,  lon:-112.07, anchor:'end'  },
+  {n:'Seattle',      lat:47.61,  lon:-122.33, anchor:'end'  },
+  {n:'Denver',       lat:39.74,  lon:-104.98, anchor:'end'  },
+  {n:'Atlanta',      lat:33.75,  lon:-84.39,  anchor:'start'},
+  {n:'Miami',        lat:25.77,  lon:-80.19,  anchor:'start'},
+  {n:'Dallas',       lat:32.78,  lon:-96.80,  anchor:'end'  },
+  {n:'Washington',   lat:38.91,  lon:-77.04,  anchor:'start'},
+  {n:'Minneapolis',  lat:44.98,  lon:-93.27,  anchor:'start'},
+  {n:'Kansas City',  lat:39.10,  lon:-94.58,  anchor:'start'},
+  {n:'San Francisco',lat:37.77,  lon:-122.42, anchor:'end'  },
+  // Canada / Alaska / Hawaii
+  {n:'Toronto',      lat:43.65,  lon:-79.38,  anchor:'start'},
+  {n:'Vancouver',    lat:49.25,  lon:-123.12, anchor:'end'  },
+  {n:'Anchorage',    lat:61.22,  lon:-149.90, anchor:'end'  },
+  {n:'Honolulu',     lat:21.31,  lon:-157.86, anchor:'end'  },
+  // Mexico / Central America
+  {n:'Mexico City',  lat:19.43,  lon:-99.13,  anchor:'end'  },
+  // South America
+  {n:'Bogotá',       lat:4.71,   lon:-74.07,  anchor:'start'},
+  {n:'Lima',         lat:-12.05, lon:-77.04,  anchor:'end'  },
+  {n:'São Paulo',    lat:-23.55, lon:-46.63,  anchor:'start'},
+  {n:'Buenos Aires', lat:-34.60, lon:-58.38,  anchor:'start'},
+  {n:'Santiago',     lat:-33.45, lon:-70.67,  anchor:'end'  },
+  // Europe
+  {n:'London',       lat:51.51,  lon:-0.13,   anchor:'start'},
+  {n:'Paris',        lat:48.85,  lon:2.35,    anchor:'start'},
+  {n:'Berlin',       lat:52.52,  lon:13.40,   anchor:'start'},
+  {n:'Madrid',       lat:40.42,  lon:-3.70,   anchor:'end'  },
+  {n:'Rome',         lat:41.90,  lon:12.50,   anchor:'start'},
+  {n:'Moscow',       lat:55.75,  lon:37.62,   anchor:'start'},
+  {n:'Istanbul',     lat:41.01,  lon:28.95,   anchor:'start'},
+  {n:'Stockholm',    lat:59.33,  lon:18.07,   anchor:'start'},
+  // Africa / Middle East
+  {n:'Cairo',        lat:30.04,  lon:31.24,   anchor:'start'},
+  {n:'Nairobi',      lat:-1.29,  lon:36.82,   anchor:'start'},
+  {n:'Lagos',        lat:6.45,   lon:3.40,    anchor:'end'  },
+  {n:'Cape Town',    lat:-33.93, lon:18.42,   anchor:'start'},
+  {n:'Dubai',        lat:25.20,  lon:55.27,   anchor:'start'},
+  // Asia
+  {n:'Mumbai',       lat:19.08,  lon:72.88,   anchor:'end'  },
+  {n:'Delhi',        lat:28.61,  lon:77.21,   anchor:'start'},
+  {n:'Bangkok',      lat:13.75,  lon:100.52,  anchor:'start'},
+  {n:'Singapore',    lat:1.35,   lon:103.82,  anchor:'start'},
+  {n:'Beijing',      lat:39.91,  lon:116.39,  anchor:'start'},
+  {n:'Tokyo',        lat:35.68,  lon:139.69,  anchor:'start'},
+  {n:'Seoul',        lat:37.57,  lon:126.98,  anchor:'end'  },
+  {n:'Shanghai',     lat:31.23,  lon:121.47,  anchor:'end'  },
+  // Oceania
+  {n:'Sydney',       lat:-33.87, lon:151.21,  anchor:'start'},
+  {n:'Auckland',     lat:-36.86, lon:174.77,  anchor:'start'},
+];
+
+// ── App state ─────────────────────────────────────────────────────────────
+let qthLat = DEFAULT_LAT, qthLon = DEFAULT_LON;
+let currentBand = '20m';
+let currentSFI  = 100;
+let heatData    = [];
+let worldTopo   = null;
+let qthMethod   = 'grid';
+
+// ── D3 globals ────────────────────────────────────────────────────────────
+let svg, projection, geoPath;
+const canvas = document.getElementById('heat-canvas');
+const ctx    = canvas.getContext('2d');
+
+const OCEAN_COLOR  = '#1e4d7b';
+const LAND_COLOR   = '#4a7055';
+const POLAR_COLOR  = '#c8d8e4';
+const BORDER_COLOR = '#2d422d';
+const GRAT_COLOR   = 'rgba(255,255,255,0.06)';
+
+// ── Projection ────────────────────────────────────────────────────────────
+function buildProjection(lon, w, h) {
+  const base = (typeof d3.geoWinkelTripel === 'function')
+    ? d3.geoWinkelTripel() : d3.geoNaturalEarth1();
+  return base.rotate([-lon, 0]).fitSize([w, h], { type:'Sphere' });
+}
+
+function initMap() {
+  svg = d3.select('#worldmap');
+  const W = window.innerWidth, H = window.innerHeight;
+  canvas.width = W; canvas.height = H;
+  projection = buildProjection(qthLon, W, H);
+  geoPath    = d3.geoPath(projection);
+
+  d3.json(WORLD_URL).then(world => {
+    worldTopo = world;
+    drawBaseMap();
+    drawCities();
+    updateOverlay();
+  }).catch(e => {
+    console.error('World topojson failed:', e);
+    document.getElementById('loading-msg').textContent = 'Map data failed to load — check network';
+  });
+
+  window.addEventListener('resize', onResize);
+}
+
+function onResize() {
+  const W = window.innerWidth, H = window.innerHeight;
+  canvas.width = W; canvas.height = H;
+  projection = buildProjection(qthLon, W, H);
+  geoPath    = d3.geoPath(projection);
+  if (worldTopo) { drawBaseMap(); drawCities(); }
+  drawHeatCanvas();
+  updateOverlay();
+}
+
+// ── Base map ──────────────────────────────────────────────────────────────
+function drawBaseMap() {
+  svg.selectAll('*').remove();
+
+  // Ocean
+  svg.append('path').datum({type:'Sphere'})
+    .attr('d', geoPath).attr('fill', OCEAN_COLOR)
+    .attr('stroke','#15385a').attr('stroke-width', 1);
+
+  // Graticule
+  svg.append('path').datum(d3.geoGraticule().step([30,30])())
+    .attr('d', geoPath).attr('fill','none')
+    .attr('stroke', GRAT_COLOR).attr('stroke-width', 0.5);
+
+  // Countries
+  const countries = topojson.feature(worldTopo, worldTopo.objects.countries);
+  svg.append('g').selectAll('path').data(countries.features).join('path')
+    .attr('d', geoPath)
+    .attr('fill', d => +d.id === 10 ? POLAR_COLOR : LAND_COLOR)
+    .attr('stroke', 'none');
+
+  // Borders
+  svg.append('path')
+    .datum(topojson.mesh(worldTopo, worldTopo.objects.countries, (a,b)=>a!==b))
+    .attr('d', geoPath).attr('fill','none')
+    .attr('stroke', BORDER_COLOR).attr('stroke-width', 0.4);
+
+  // Sphere outline ring
+  svg.append('path').datum({type:'Sphere'})
+    .attr('d', geoPath).attr('fill','none')
+    .attr('stroke','#0d1117').attr('stroke-width', 3);
+
+  svg.append('g').attr('id','city-g');
+  svg.append('g').attr('id','overlay-g');
+}
+
+// ── Cities ────────────────────────────────────────────────────────────────
+function drawCities() {
+  const g = svg.select('#city-g');
+  if (g.empty()) return;
+  const W = window.innerWidth, H = window.innerHeight;
+
+  CITIES.forEach(c => {
+    const pt = projection([c.lon, c.lat]);
+    if (!pt) return;
+    const [x, y] = pt;
+    if (x < 2 || x > W-2 || y < 2 || y > H-2) return;
+
+    const dx = c.anchor === 'start' ? 5 : -5;
+
+    // Dot
+    g.append('circle')
+      .attr('cx',x).attr('cy',y).attr('r', 2.5)
+      .attr('fill','#94a3b8').attr('opacity', 0.9)
+      .attr('stroke','rgba(0,0,0,0.5)').attr('stroke-width', 0.5);
+
+    // Shadow text
+    g.append('text')
+      .attr('x', x+dx).attr('y', y+3.5)
+      .attr('text-anchor', c.anchor)
+      .attr('font-size','7.5px').attr('font-family','Segoe UI,Arial,sans-serif')
+      .attr('fill','rgba(0,0,0,0.85)').attr('stroke','rgba(0,0,0,0.85)')
+      .attr('stroke-width','2.5px').attr('stroke-linejoin','round')
+      .text(c.n);
+
+    // Main label
+    g.append('text')
+      .attr('x', x+dx).attr('y', y+3.5)
+      .attr('text-anchor', c.anchor)
+      .attr('font-size','7.5px').attr('font-family','Segoe UI,Arial,sans-serif')
+      .attr('fill','#cbd5e1')
+      .text(c.n);
+  });
+}
+
+// ── QTH / skip-zone overlay ───────────────────────────────────────────────
+function updateOverlay() {
+  const g = svg.select('#overlay-g');
+  if (g.empty()) return;
+  g.selectAll('*').remove();
+
+  function geoCirclePath(radiusKm, centerLon, centerLat) {
+    const deg = radiusKm / 111.0;
+    if (deg <= 0 || deg >= 90) return null;
+    try { return d3.geoCircle().center([centerLon, centerLat]).radius(deg)(); }
+    catch { return null; }
+  }
+
+  // QTH radius circle
+  const qthGeo = geoCirclePath(QTH_CIRCLE_KM, qthLon, qthLat);
+  if (qthGeo) {
+    g.append('path').datum(qthGeo).attr('d', geoPath)
+      .attr('fill','rgba(56,189,248,0.06)').attr('stroke','#38bdf8')
+      .attr('stroke-width', 1.5).attr('stroke-dasharray','5 4').attr('opacity', 0.75);
+  }
+
+  // Skip zone
+  const freq   = BAND_FREQ[currentBand] || 14.175;
+  const skipKm = estimateSkipKm(freq, currentSFI);
+  if (skipKm > 300) {
+    const skipGeo = geoCirclePath(skipKm, qthLon, qthLat);
+    if (skipGeo) {
+      g.append('path').datum(skipGeo).attr('d', geoPath)
+        .attr('fill','none').attr('stroke','#94a3b8')
+        .attr('stroke-width', 1.5).attr('stroke-dasharray','6 4').attr('opacity', 0.55);
+    }
+  }
+
+  // QTH dot with glow
+  let defs = svg.select('defs');
+  if (defs.empty()) defs = svg.insert('defs',':first-child');
+  if (defs.select('#qth-glow').empty()) {
+    const f = defs.append('filter').attr('id','qth-glow');
+    f.append('feGaussianBlur').attr('stdDeviation', 3).attr('result','blur');
+    const m = f.append('feMerge');
+    m.append('feMergeNode').attr('in','blur');
+    m.append('feMergeNode').attr('in','SourceGraphic');
+  }
+
+  const pt = projection([qthLon, qthLat]);
+  if (pt) {
+    g.append('circle').attr('cx',pt[0]).attr('cy',pt[1]).attr('r', 7)
+      .attr('fill','#38bdf8').attr('stroke','#fff').attr('stroke-width', 2)
+      .attr('filter','url(#qth-glow)');
+  }
+}
+
+function estimateSkipKm(freqMhz, sfi) {
+  const foF2 = Math.max(1.0, 0.01 * sfi + 3.5);
+  if (freqMhz <= foF2) return 150;
+  return Math.round(Math.min(2 * 300 * Math.sqrt((freqMhz/foF2)**2 - 1), 4500));
+}
+
+// ── Heatmap canvas ────────────────────────────────────────────────────────
+// Color scale: black → dark red → red → orange → yellow → lime → green
+// Strength  0.00 = genuinely closed (no color rendered, filtered by server)
+// Strength ~0.10 = very low probability → deep red
+// Strength  0.50 = marginal → orange
+// Strength  0.75 = probable → yellow-green
+// Strength  1.00 = prime operating range → bright green
+function heatColor(s) {
+  const stops = [
+    [0.00, [120,  0,  0]],   // deep red  — very low probability
+    [0.20, [200, 30,  0]],   // red
+    [0.40, [255,110,  0]],   // orange
+    [0.60, [255,210,  0]],   // yellow
+    [0.78, [140,255, 20]],   // lime green — good probability
+    [1.00, [  0,220, 60]],   // green      — prime range
+  ];
+  for (let i = 1; i < stops.length; i++) {
+    const [t0,c0] = stops[i-1], [t1,c1] = stops[i];
+    if (s <= t1 || i === stops.length-1) {
+      const t = t1>t0 ? (s-t0)/(t1-t0) : 0;
+      return c0.map((v,j) => Math.round(v + t*(c1[j]-v)));
+    }
+  }
+  return [0,220,60];
+}
+
+// Offscreen canvas reused across redraws to avoid repeated allocation
+let _offCanvas = null;
+
+function drawHeatCanvas() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (!heatData.length) return;
+
+  // Draw onto an offscreen canvas first so we can cap per-pixel alpha.
+  // Without capping, overlapping blobs accumulate toward fully opaque and
+  // hide the map underneath in well-covered regions.
+  if (!_offCanvas || _offCanvas.width !== canvas.width || _offCanvas.height !== canvas.height) {
+    _offCanvas = document.createElement('canvas');
+    _offCanvas.width  = canvas.width;
+    _offCanvas.height = canvas.height;
+  }
+  const offCtx = _offCanvas.getContext('2d');
+  offCtx.clearRect(0, 0, _offCanvas.width, _offCanvas.height);
+
+  for (const [lat, lon, strength] of heatData) {
+    const pt = projection([lon, lat]);
+    if (!pt) continue;
+    const [x, y] = pt;
+    if (x<-50||x>canvas.width+50||y<-50||y>canvas.height+50) continue;
+    const [r,g,b] = heatColor(strength);
+    // Per-blob alpha: weak signals are faint (0.25), strong signals solid (0.55).
+    // The alpha cap below prevents dense areas from going fully opaque.
+    offCtx.fillStyle = `rgba(${r},${g},${b},${0.25 + strength * 0.30})`;
+    offCtx.beginPath();
+    offCtx.arc(x, y, HEAT_RADIUS, 0, 2*Math.PI);
+    offCtx.fill();
+  }
+
+  // Cap every pixel's alpha channel so the map always shows through.
+  // MAX_A = 145/255 ≈ 57 % opacity ceiling before the CSS opacity multiplier.
+  // Combined with opacity:0.85 in CSS → effective max ≈ 48 % opaque.
+  const MAX_A = 145;
+  const imgData = offCtx.getImageData(0, 0, _offCanvas.width, _offCanvas.height);
+  const d = imgData.data;
+  for (let i = 3; i < d.length; i += 4) {
+    if (d[i] > MAX_A) d[i] = MAX_A;
+  }
+  offCtx.putImageData(imgData, 0, 0);
+
+  ctx.drawImage(_offCanvas, 0, 0);
+}
+
+// ── Tooltip ───────────────────────────────────────────────────────────────
+function showTip(event, key) {
+  const tip  = document.getElementById('tip-box');
+  const info = SOLAR_TIPS[key];
+  if (!info) return;
+  document.getElementById('tip-title').textContent = info.title;
+  document.getElementById('tip-lines').innerHTML   = info.lines.map(l=>`<li>${l}</li>`).join('');
+  moveTip(event);
+  tip.style.display = 'block';
+}
+function moveTip(event) {
+  const tip = document.getElementById('tip-box');
+  const W   = window.innerWidth, H = window.innerHeight;
+  let left  = event.clientX + 14;
+  let top   = event.clientY - 10;
+  if (left + 280 > W) left = event.clientX - 284;
+  if (top  + 200 > H) top  = H - 210;
+  tip.style.left = left + 'px';
+  tip.style.top  = Math.max(4, top) + 'px';
+}
+function hideTip() { document.getElementById('tip-box').style.display = 'none'; }
+
+// ── Panel hamburger ───────────────────────────────────────────────────────
+function togglePanel() {
+  const body = document.getElementById('panel-body');
+  const btn  = document.getElementById('hamburger');
+  const open = body.classList.toggle('collapsed');
+  btn.textContent = open ? '☰' : '✕';
+}
+
+// ── QTH section ───────────────────────────────────────────────────────────
+function setQTHMethod(method) {
+  qthMethod = method;
+  ['grid','latlon','zip'].forEach(m => {
+    document.getElementById(`m-${m}`).classList.toggle('active', m === method);
+  });
+  document.getElementById('qth-grid-input').style.display = method==='grid'   ? '' : 'none';
+  document.getElementById('qth-ll-input'  ).style.display = method==='latlon' ? '' : 'none';
+  document.getElementById('qth-zip-input' ).style.display = method==='zip'    ? '' : 'none';
+}
+
+function gridToLatLon(grid) {
+  grid = grid.toUpperCase().trim();
+  if (grid.length < 4) return null;
+  try {
+    const lon = (grid.charCodeAt(0)-65)*20 - 180 + parseInt(grid[2])*2;
+    const lat = (grid.charCodeAt(1)-65)*10 - 90  + parseInt(grid[3]);
+    if (grid.length >= 6) return {
+      lat: lat + (grid.charCodeAt(5)-65)*(2.5/60) + (2.5/120),
+      lon: lon + (grid.charCodeAt(4)-65)*(5/60)   + (5/120),
+    };
+    return { lat: lat+0.5, lon: lon+1.0 };
+  } catch { return null; }
+}
+
+async function applyQTH() {
+  const btn = document.getElementById('set-qth-btn');
+  btn.disabled = true; btn.textContent = 'Setting…';
+  setQTHStatus('');
+  try {
+    if (qthMethod === 'grid') {
+      const grid = document.getElementById('inp-grid').value.trim();
+      const ll   = gridToLatLon(grid);
+      if (!ll) { setQTHStatus('Invalid grid — use format like EM38 or EM38ab', true); return; }
+      onQTHSet(ll.lat, ll.lon, { grid });
+
+    } else if (qthMethod === 'latlon') {
+      const lat = parseFloat(document.getElementById('inp-lat').value);
+      const lon = parseFloat(document.getElementById('inp-lon').value);
+      if (isNaN(lat)||isNaN(lon)||lat<-90||lat>90||lon<-180||lon>180)
+        { setQTHStatus('Invalid coordinates', true); return; }
+      onQTHSet(lat, lon, {});
+
+    } else if (qthMethod === 'zip') {
+      const zip = document.getElementById('inp-zip').value.trim().replace(/\D/g,'').padStart(5,'0');
+      if (zip.length !== 5) { setQTHStatus('Enter a 5-digit US ZIP code', true); return; }
+      setQTHStatus('Looking up ZIP ' + zip + '…');
+      const res = await fetch(`/zip/${zip}`);
+      const d   = await res.json();
+      if (!res.ok || d.error) { setQTHStatus(d.error || 'ZIP lookup failed', true); return; }
+      onQTHSet(d.lat, d.lon, { city: d.city, state: d.state, zip });
+    }
+  } catch(e) {
+    setQTHStatus('Error: ' + e.message, true);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Set QTH';
+  }
+}
+
+function onQTHSet(lat, lon, meta) {
+  qthLat = lat; qthLon = lon;
+  let label = `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+  if (meta.city) label = `${meta.city}, ${meta.state} — ${label}`;
+  else if (meta.grid) label = `${meta.grid.toUpperCase()} — ${label}`;
+  setQTHStatus('QTH: ' + label);
+
+  const W = window.innerWidth, H = window.innerHeight;
+  projection = buildProjection(lon, W, H);
+  geoPath    = d3.geoPath(projection);
+  if (worldTopo) { drawBaseMap(); drawCities(); }
+  drawHeatCanvas();
+  loadBand(currentBand);
+}
+
+function setQTHStatus(msg, isError) {
+  const el = document.getElementById('qth-status-line');
+  el.textContent = msg;
+  el.style.color = isError ? '#f87171' : '#64748b';
+}
+
+// ── Loading overlay ───────────────────────────────────────────────────────
+function showLoading(msg) {
+  document.getElementById('loading-msg').textContent = msg || 'Loading…';
+  document.getElementById('loading').classList.remove('hidden');
+}
+function hideLoading() {
+  document.getElementById('loading').classList.add('hidden');
+}
+
+// ── Band / heatmap loading ────────────────────────────────────────────────
+function loadBand(band) {
+  currentBand = band;
+  document.getElementById('band-select').value = band;
+  showLoading(`Computing ${band} propagation… (may take ~15 s on first load)`);
+
+  const failsafe = setTimeout(() => {
+    hideLoading();
+    const el = document.getElementById('status');
+    el.textContent = 'Heatmap timed out — server may still be computing';
+    el.className = 'stale';
+  }, 45000);
+
+  fetch(`/heatmap/${band}?lat=${qthLat}&lon=${qthLon}`)
+    .then(r => { if (!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+    .then(pts => {
+      clearTimeout(failsafe);
+      heatData = pts;
+      drawHeatCanvas();
+      updateOverlay();
+      hideLoading();
+    })
+    .catch(e => {
+      clearTimeout(failsafe);
+      document.getElementById('loading-msg').textContent = 'Error: '+e.message;
+      setTimeout(hideLoading, 4000);
+    });
+}
+
+// ── Solar indices ─────────────────────────────────────────────────────────
+function condClass(cond) {
+  const c = (cond||'').trim();
+  return c==='Good' ? 'cond-Good' : c==='Fair' ? 'cond-Fair'
+       : c==='Poor' ? 'cond-Poor' : 'cond-Unknown';
+}
+
+function renderBandConditions(bc) {
+  const el = document.getElementById('band-cond');
+  if (!bc || !Object.keys(bc).length) {
+    el.innerHTML = '<div style="color:#475569;font-size:0.65rem">No condition data available</div>';
+    return;
+  }
+  const groups = [
+    { key:'80m-40m', label:'80m / 40m' },
+    { key:'30m-20m', label:'30m / 20m' },
+    { key:'17m-15m', label:'17m / 15m' },
+    { key:'12m-10m', label:'12m / 10m' },
+  ];
+  const rows = groups.map(g => {
+    const day   = bc[`${g.key}_day`]   || 'N/A';
+    const night = bc[`${g.key}_night`] || 'N/A';
+    return `<tr>
+      <td class="bc-band">${g.label}</td>
+      <td><span class="cond-pill ${condClass(day)}">${day}</span></td>
+      <td><span class="cond-pill ${condClass(night)}">${night}</span></td>
+    </tr>`;
+  }).join('');
+  el.innerHTML = `<table class="bc-table">
+    <thead><tr><th>Band</th><th>☀ Day</th><th>☾ Night</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>
+  <div style="font-size:0.58rem;color:#475569;margin-top:3px">
+    60m follows 80m/40m pattern. Source: hamqsl.com
+  </div>`;
+}
+
+function updateSolar() {
+  return fetch('/solar')
+    .then(r => r.json())
+    .then(d => {
+      if (d.SFI != null) currentSFI = parseFloat(d.SFI);
+      document.getElementById('val-sfi').textContent = d.SFI              ?? '—';
+      document.getElementById('val-ki' ).textContent = d['K-index']       ?? '—';
+      document.getElementById('val-ai' ).textContent = d['A-index']       ?? '—';
+      document.getElementById('val-ssn').textContent = d['Sunspot Number']?? '—';
+      renderBandConditions(d.band_conditions);
+      const ts  = d.last_update ? new Date(d.last_update*1000).toLocaleTimeString() : 'never';
+      const src = d.source || '';
+      const el  = document.getElementById('status');
+      el.textContent = (d.stale?'[STALE] ':'') + 'Updated '+ts+(src?' · '+src:'');
+      el.className   = d.stale ? 'stale' : '';
+    })
+    .catch(() => {
+      const el = document.getElementById('status');
+      el.textContent = 'Solar data unavailable';
+      el.className   = 'stale';
+    });
+}
+
+function manualRefresh() {
+  const btn = document.getElementById('refresh-btn');
+  btn.disabled = true; btn.textContent = 'Refreshing…';
+  updateSolar().then(() => loadBand(currentBand));
+  setTimeout(() => { btn.disabled=false; btn.textContent='Refresh Now'; }, 5000);
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────
+try {
+  initMap();
+} catch(e) {
+  console.error('Map init error:', e);
+  document.getElementById('loading-msg').textContent =
+    'Map init failed: ' + e.message + ' — check browser console';
+}
+updateSolar();
+loadBand('20m');
+setInterval(function() { updateSolar(); loadBand(currentBand); }, 900000);
+</script>
 </body>
 </html>
