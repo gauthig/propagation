@@ -378,7 +378,7 @@
 
     <hr class="divider">
 
-    <button id="refresh-btn" onclick="manualRefresh()">Refresh Now</button>
+    <button id="refresh-btn" onclick="manualRefresh()" style="display:none">Refresh Now</button>
     <div id="status">Initializing…</div>
 
     <!-- ── My QTH ────────────────────────────────────── -->
@@ -939,10 +939,49 @@ function hideHelp(e) {
 }
 
 // ── Callsign / session persistence ───────────────────────────────────────
-const LS_CALL  = 'hf_callsign';
-const LS_LAT   = 'hf_qth_lat';
-const LS_LON   = 'hf_qth_lon';
-const LS_LABEL = 'hf_qth_label';
+const LS_CALL    = 'hf_callsign';
+const LS_LAT     = 'hf_qth_lat';
+const LS_LON     = 'hf_qth_lon';
+const LS_LABEL   = 'hf_qth_label';
+const LS_SESSION = 'hf_session_id';
+
+function getSessionId() {
+  let sid = localStorage.getItem(LS_SESSION);
+  if (!sid) {
+    sid = crypto.randomUUID();
+    localStorage.setItem(LS_SESSION, sid);
+  }
+  return sid;
+}
+
+function trackVisit() {
+  fetch('/track/visit', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({session_id: getSessionId()}),
+  }).catch(() => {});
+}
+
+function trackCallsign(callsign) {
+  fetch('/track/callsign', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({session_id: getSessionId(), callsign}),
+  }).catch(() => {});
+}
+
+function trackQTH(lat, lon, method) {
+  fetch('/track/qth', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({session_id: getSessionId(), lat, lon, method}),
+  }).catch(() => {});
+}
+
+function updateRefreshBtn() {
+  const callsign = (localStorage.getItem(LS_CALL) || '').toUpperCase();
+  document.getElementById('refresh-btn').style.display = callsign === 'WB0Z' ? '' : 'none';
+}
 
 function initSession() {
   const stored = localStorage.getItem(LS_CALL);
@@ -951,6 +990,7 @@ function initSession() {
     setTimeout(() => document.getElementById('callsign-modal').classList.remove('hidden'), 800);
   } else {
     applyCallsign(stored);
+    if (stored) trackCallsign(stored);  // re-link this session to the callsign on every return visit
   }
 
   // Restore saved QTH if available
@@ -975,6 +1015,7 @@ function applyCallsign(call) {
   } else {
     badge.style.display = 'none';
   }
+  updateRefreshBtn();
 }
 
 function saveCallsign() {
@@ -982,6 +1023,7 @@ function saveCallsign() {
   localStorage.setItem(LS_CALL, raw);
   applyCallsign(raw);
   document.getElementById('callsign-modal').classList.add('hidden');
+  if (raw) trackCallsign(raw);
 }
 
 function skipCallsign() {
@@ -1074,6 +1116,7 @@ function onQTHSet(lat, lon, meta) {
   localStorage.setItem(LS_LAT,   lat);
   localStorage.setItem(LS_LON,   lon);
   localStorage.setItem(LS_LABEL, 'QTH: ' + label);
+  trackQTH(lat, lon, qthMethod);
 
   const W = window.innerWidth, H = window.innerHeight;
   projection = buildProjection(lon, W, H);
@@ -1214,8 +1257,23 @@ function updateSolar() {
 function manualRefresh() {
   const btn = document.getElementById('refresh-btn');
   btn.disabled = true; btn.textContent = 'Refreshing…';
-  updateSolar().then(() => loadBand(currentBand));
-  setTimeout(() => { btn.disabled=false; btn.textContent='Refresh Now'; }, 5000);
+  fetch('/solar/refresh', {method: 'POST'})
+    .then(r => r.json())
+    .then(d => {
+      if (d.SFI != null) currentSFI = parseFloat(d.SFI);
+      document.getElementById('val-sfi').textContent = d.SFI              ?? '—';
+      document.getElementById('val-ki' ).textContent = d['K-index']       ?? '—';
+      document.getElementById('val-ai' ).textContent = d['A-index']       ?? '—';
+      document.getElementById('val-ssn').textContent = d['Sunspot Number']?? '—';
+      renderBandConditions(d.band_conditions);
+      const ts = d.last_update ? new Date(d.last_update*1000).toLocaleTimeString() : 'now';
+      document.getElementById('status').textContent = 'Refreshed ' + ts + ' · ' + (d.source || '');
+      loadBand(currentBand);
+    })
+    .catch(() => {
+      document.getElementById('status').textContent = 'Refresh failed';
+    })
+    .finally(() => { btn.disabled=false; btn.textContent='Refresh Now'; });
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────
@@ -1230,6 +1288,7 @@ try {
     'Map init failed: ' + e.message + ' — check browser console';
 }
 initSession();   // restore callsign + QTH from localStorage, show popup if first visit
+trackVisit();    // log visit to DynamoDB
 updateSolar();
 loadBand('20m');
 setInterval(function() { updateSolar(); loadBand(currentBand); }, 900000);

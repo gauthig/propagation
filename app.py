@@ -4,16 +4,20 @@ import threading
 import time
 import base64
 import sys
+import datetime
+from decimal import Decimal
 from io import BytesIO
 from propagation import calculate_muf_map, get_solar_indices
 
+import boto3
+
 app = Flask(__name__)
 
-# ── Configuration ─────────────────────────────────────────────────────────────
-DEFAULT_LAT = 39.8   # Geographic center of contiguous US (central Kansas)
+# ── Configuration ──────────────────────────────────────────────────────────────
+DEFAULT_LAT = 39.8
 DEFAULT_LON = -98.6
-
-REFRESH_INTERVAL = 900  # seconds
+REFRESH_INTERVAL   = 900   # seconds — local dev background thread
+SOLAR_MAX_AGE_SECS = 7200  # 2 hours — DynamoDB cache TTL
 
 BAND_FREQS = {
     '80m': (3.500, 4.000),
@@ -25,7 +29,141 @@ BAND_FREQS = {
     '10m': (28.000, 29.700),
 }
 
-# ── Server-side cache  (only 20m/40m are pre-warmed; others compute on demand) ─
+# ── DynamoDB ───────────────────────────────────────────────────────────────────
+_dynamo      = boto3.resource('dynamodb')
+_users_table = _dynamo.Table('hf_users')
+_solar_table = _dynamo.Table('hf_solar')
+
+
+def _to_dynamo(obj):
+    """Recursively convert Python floats to Decimal for DynamoDB storage."""
+    if isinstance(obj, bool):
+        return obj
+    if isinstance(obj, float):
+        return Decimal(str(obj))
+    if isinstance(obj, dict):
+        return {k: _to_dynamo(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_to_dynamo(v) for v in obj]
+    return obj
+
+
+def _from_dynamo(obj):
+    """Recursively convert DynamoDB Decimals back to Python floats."""
+    if isinstance(obj, Decimal):
+        return float(obj)
+    if isinstance(obj, dict):
+        return {k: _from_dynamo(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_from_dynamo(v) for v in obj]
+    return obj
+
+
+# ── Solar DynamoDB cache ───────────────────────────────────────────────────────
+
+def _get_solar_db():
+    """Return cached solar data from DynamoDB if under 2 hours old, else None."""
+    try:
+        resp = _solar_table.get_item(Key={'record_id': 'current'})
+        item = resp.get('Item')
+        if not item:
+            return None
+        age = time.time() - float(item.get('timestamp_epoch', 0))
+        if age > SOLAR_MAX_AGE_SECS:
+            print(f"[dynamo] solar cache is {age/3600:.1f} h old — needs refresh")
+            return None
+        data = _from_dynamo(item)
+        data.pop('record_id', None)
+        data['last_update'] = data.pop('timestamp_epoch', time.time())
+        print(f"[dynamo] solar cache hit — age {age/60:.0f} min")
+        return data
+    except Exception as e:
+        print(f"[dynamo] solar read error: {e}")
+        return None
+
+
+def _put_solar_db(data):
+    """Write solar data to DynamoDB hf_solar table."""
+    try:
+        item = _to_dynamo({k: v for k, v in data.items() if k != 'last_update'})
+        item['record_id']       = 'current'
+        item['timestamp']       = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        item['timestamp_epoch'] = Decimal(str(time.time()))
+        _solar_table.put_item(Item=item)
+        print("[dynamo] solar cache written")
+    except Exception as e:
+        print(f"[dynamo] solar write error: {e}")
+
+
+def _fetch_and_cache_solar():
+    """Fetch fresh solar data from external APIs and store it in DynamoDB."""
+    data = get_solar_indices()
+    _put_solar_db(data)
+    data['last_update'] = time.time()
+    return data
+
+
+# ── User tracking ──────────────────────────────────────────────────────────────
+
+def _track_visit(session_id, ip):
+    """Upsert a visit row — increments access_count, updates last_seen and IP."""
+    if not session_id:
+        return
+    try:
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        _users_table.update_item(
+            Key={'session_id': session_id},
+            UpdateExpression=(
+                'SET last_seen = :ts, ip_address = :ip, '
+                'first_seen = if_not_exists(first_seen, :ts) '
+                'ADD access_count :one'
+            ),
+            ExpressionAttributeValues={':ts': now, ':ip': ip, ':one': 1},
+        )
+    except Exception as e:
+        print(f"[dynamo] track_visit error: {e}")
+
+
+def _track_callsign(session_id, callsign, ip):
+    """Store callsign against the session."""
+    if not session_id or not callsign:
+        return
+    try:
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        _users_table.update_item(
+            Key={'session_id': session_id},
+            UpdateExpression=(
+                'SET callsign = :cs, last_seen = :ts, ip_address = :ip, '
+                'first_seen = if_not_exists(first_seen, :ts) '
+                'ADD access_count :one'
+            ),
+            ExpressionAttributeValues={
+                ':cs': callsign, ':ts': now, ':ip': ip, ':one': 1,
+            },
+        )
+    except Exception as e:
+        print(f"[dynamo] track_callsign error: {e}")
+
+
+def _track_qth(session_id, lat, lon, method):
+    """Update QTH coordinates and entry method for a session."""
+    if not session_id:
+        return
+    try:
+        _users_table.update_item(
+            Key={'session_id': session_id},
+            UpdateExpression='SET qth_lat = :lat, qth_lon = :lon, qth_method = :m',
+            ExpressionAttributeValues={
+                ':lat': Decimal(str(lat)),
+                ':lon': Decimal(str(lon)),
+                ':m':   method,
+            },
+        )
+    except Exception as e:
+        print(f"[dynamo] track_qth error: {e}")
+
+
+# ── In-process cache (warm Lambda instance / local dev) ───────────────────────
 _lock  = threading.Lock()
 _cache = {
     'solar': None, 'last_update': None,
@@ -35,10 +173,11 @@ _cache = {
 
 
 def _refresh_loop():
+    """Local dev background thread — pre-warms 20m/40m heatmap every 15 min."""
     while True:
         try:
             print("[refresh] fetching solar indices...")
-            solar = get_solar_indices()
+            solar = _fetch_and_cache_solar()
             with _lock:
                 lat = _cache['cache_lat']
                 lon = _cache['cache_lon']
@@ -57,7 +196,7 @@ def _refresh_loop():
         time.sleep(REFRESH_INTERVAL)
 
 
-# ── Routes ────────────────────────────────────────────────────────────────────
+# ── Routes ─────────────────────────────────────────────────────────────────────
 
 @app.route('/')
 def index():
@@ -65,6 +204,71 @@ def index():
                            default_lat=DEFAULT_LAT,
                            default_lon=DEFAULT_LON)
 
+
+# ── Tracking endpoints ─────────────────────────────────────────────────────────
+
+@app.route('/track/visit', methods=['POST'])
+def track_visit():
+    data = request.get_json(silent=True) or {}
+    _track_visit(data.get('session_id', ''), request.remote_addr or '0.0.0.0')
+    return jsonify({'ok': True})
+
+
+@app.route('/track/callsign', methods=['POST'])
+def track_callsign():
+    data     = request.get_json(silent=True) or {}
+    callsign = data.get('callsign', '').upper().strip()
+    _track_callsign(data.get('session_id', ''), callsign, request.remote_addr or '0.0.0.0')
+    return jsonify({'ok': True})
+
+
+@app.route('/track/qth', methods=['POST'])
+def track_qth():
+    data = request.get_json(silent=True) or {}
+    sid  = data.get('session_id', '')
+    lat  = data.get('lat')
+    lon  = data.get('lon')
+    if sid and lat is not None and lon is not None:
+        _track_qth(sid, float(lat), float(lon), data.get('method', ''))
+    return jsonify({'ok': True})
+
+
+# ── Solar ──────────────────────────────────────────────────────────────────────
+
+@app.route('/solar')
+def solar_data():
+    try:
+        # 1. Try DynamoDB cache first
+        data = _get_solar_db()
+
+        # 2. Cache miss or expired — fetch fresh and update DynamoDB
+        if data is None:
+            data = _fetch_and_cache_solar()
+
+        # 3. Keep in-process cache warm for heatmap route
+        with _lock:
+            _cache['solar']       = data
+            _cache['last_update'] = data.get('last_update', time.time())
+
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({'error': str(e), 'stale': True}), 500
+
+
+@app.route('/solar/refresh', methods=['POST'])
+def solar_refresh():
+    """Force a fresh solar fetch regardless of cache age. WB0Z-only button calls this."""
+    try:
+        data = _fetch_and_cache_solar()
+        with _lock:
+            _cache['solar']       = data
+            _cache['last_update'] = data.get('last_update', time.time())
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({'error': str(e), 'stale': True}), 500
+
+
+# ── Heatmap ────────────────────────────────────────────────────────────────────
 
 @app.route('/heatmap/<band>')
 def heatmap(band):
@@ -77,8 +281,7 @@ def heatmap(band):
     except (TypeError, ValueError):
         req_lat, req_lon = DEFAULT_LAT, DEFAULT_LON
 
-    # Antenna parameters
-    antenna_type  = request.args.get('antenna', 'vertical')
+    antenna_type = request.args.get('antenna', 'vertical')
     if antenna_type not in ('vertical', 'dipole', 'hex_beam'):
         antenna_type = 'vertical'
     try:
@@ -99,7 +302,6 @@ def heatmap(band):
     except (TypeError, ValueError):
         dipole_orient = 0.0
 
-    # Non-default antenna always bypasses the pre-warmed vertical cache
     use_cache = (antenna_type == 'vertical')
 
     with _lock:
@@ -110,7 +312,9 @@ def heatmap(band):
         data      = _cache.get(band) if (same_loc and use_cache) else None
 
     if solar is None or data is None:
-        solar = solar or get_solar_indices()
+        # Pull solar from DynamoDB if not in process cache
+        if solar is None:
+            solar = _get_solar_db() or _fetch_and_cache_solar()
         freq_min, freq_max = BAND_FREQS[band]
         data = calculate_muf_map(req_lat, req_lon, freq_min, freq_max, solar,
                                  antenna_type=antenna_type, height_m=height_m,
@@ -124,20 +328,7 @@ def heatmap(band):
     return jsonify(data)
 
 
-@app.route('/solar')
-def solar_data():
-    try:
-        with _lock:
-            data   = dict(_cache['solar']) if _cache['solar'] else None
-            uptime = _cache['last_update']
-        if data is None:
-            data   = get_solar_indices()
-            uptime = time.time()
-        data['last_update'] = uptime
-        return jsonify(data)
-    except Exception as e:
-        return jsonify({'error': str(e), 'stale': True}), 500
-
+# ── ZIP geocoding ──────────────────────────────────────────────────────────────
 
 @app.route('/zip/<zipcode>')
 def zip_lookup(zipcode):
@@ -153,7 +344,7 @@ def zip_lookup(zipcode):
             return jsonify({'error': f'ZIP code {zipcode} not found'}), 404
         if not r.ok:
             return jsonify({'error': 'ZIP lookup service unavailable'}), 502
-        d = r.json()
+        d     = r.json()
         place = d['places'][0]
         return jsonify({
             'zipcode': zipcode,
@@ -168,32 +359,35 @@ def zip_lookup(zipcode):
         return jsonify({'error': 'Unexpected response from ZIP service'}), 500
 
 
+# ── Lambda WSGI adapter ────────────────────────────────────────────────────────
+
 def handler(event, context):
     """Minimal WSGI adapter for Lambda Function URLs (payload format v2.0)."""
-    http      = event['requestContext']['http']
-    path      = event.get('rawPath', '/')
-    qs        = event.get('rawQueryString', '') or ''
-    headers   = {k.lower(): v for k, v in (event.get('headers') or {}).items()}
+    http    = event['requestContext']['http']
+    path    = event.get('rawPath', '/')
+    qs      = event.get('rawQueryString', '') or ''
+    headers = {k.lower(): v for k, v in (event.get('headers') or {}).items()}
 
     body = event.get('body') or ''
     body_bytes = base64.b64decode(body) if event.get('isBase64Encoded') else body.encode()
 
     environ = {
-        'REQUEST_METHOD':  http['method'],
-        'PATH_INFO':       path,
-        'QUERY_STRING':    qs,
-        'CONTENT_TYPE':    headers.get('content-type', ''),
-        'CONTENT_LENGTH':  str(len(body_bytes)),
-        'SERVER_NAME':     'lambda',
-        'SERVER_PORT':     '443',
-        'SERVER_PROTOCOL': 'HTTP/1.1',
-        'wsgi.version':    (1, 0),
-        'wsgi.url_scheme': 'https',
-        'wsgi.input':      BytesIO(body_bytes),
-        'wsgi.errors':     sys.stderr,
-        'wsgi.multithread': False,
+        'REQUEST_METHOD':   http['method'],
+        'PATH_INFO':        path,
+        'QUERY_STRING':     qs,
+        'CONTENT_TYPE':     headers.get('content-type', ''),
+        'CONTENT_LENGTH':   str(len(body_bytes)),
+        'REMOTE_ADDR':      http.get('sourceIp', '0.0.0.0'),
+        'SERVER_NAME':      'lambda',
+        'SERVER_PORT':      '443',
+        'SERVER_PROTOCOL':  'HTTP/1.1',
+        'wsgi.version':     (1, 0),
+        'wsgi.url_scheme':  'https',
+        'wsgi.input':       BytesIO(body_bytes),
+        'wsgi.errors':      sys.stderr,
+        'wsgi.multithread':  False,
         'wsgi.multiprocess': False,
-        'wsgi.run_once':   False,
+        'wsgi.run_once':     False,
     }
     for k, v in headers.items():
         key = k.upper().replace('-', '_')
@@ -211,9 +405,9 @@ def handler(event, context):
     is_binary = not (ct.startswith('text/') or 'json' in ct)
 
     return {
-        'statusCode':     status_holder.get('code', 200),
-        'headers':        resp_headers,
-        'body':           base64.b64encode(body_out).decode() if is_binary else body_out.decode(),
+        'statusCode':      status_holder.get('code', 200),
+        'headers':         resp_headers,
+        'body':            base64.b64encode(body_out).decode() if is_binary else body_out.decode(),
         'isBase64Encoded': is_binary,
     }
 

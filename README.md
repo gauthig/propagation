@@ -2,17 +2,19 @@
 
 A real-time HF skywave propagation visualizer for amateur radio operators. Shows estimated band openness from your QTH to every point on the globe, driven by live solar indices and a physics-based ionospheric model.
 
-![Stack](https://img.shields.io/badge/Python-3.10%2B-blue) ![Flask](https://img.shields.io/badge/Flask-3.x-green) ![AWS Lambda](https://img.shields.io/badge/Deploy-AWS%20Lambda-orange)
+![Stack](https://img.shields.io/badge/Python-3.10%2B-blue) ![Flask](https://img.shields.io/badge/Flask-3.x-green) ![AWS Lambda](https://img.shields.io/badge/Deploy-AWS%20Lambda-orange) ![DynamoDB](https://img.shields.io/badge/DB-DynamoDB-yellow)
 
 ---
 
 ## What It Does
 
 - Fetches live solar data (SFI, K-index, A-index, sunspot number) from hamqsl.com with a NOAA fallback
+- Caches solar data in DynamoDB — shared across all Lambda instances, auto-refreshed when over 2 hours old
 - Computes a global heatmap of propagation probability on the selected amateur band using a multi-hop F2 ionospheric model
 - Renders the heatmap over a Winkel Tripel world map using D3.js and an HTML5 Canvas
 - Supports three antenna models (vertical, dipole, hex beam) with height and orientation controls
 - Lets you set your QTH by Maidenhead grid square, lat/lon, or US ZIP code
+- Tracks visitors in DynamoDB by callsign, session, IP, QTH, and access count
 - Remembers your callsign and QTH across sessions via localStorage
 
 ---
@@ -21,11 +23,11 @@ A real-time HF skywave propagation visualizer for amateur radio operators. Shows
 
 ```
 propagation/
-├── app.py              # Flask app — routes, cache, Lambda handler
+├── app.py              # Flask app — routes, DynamoDB helpers, Lambda WSGI handler
 ├── propagation.py      # Ionospheric model — foF2, MUF, antenna factors
 ├── templates/
 │   └── index.html      # Single-page UI — D3 map, panel, all JavaScript
-├── requirements.txt    # flask, requests
+├── requirements.txt    # flask, requests (boto3 is pre-installed in Lambda runtime)
 └── README.md
 ```
 
@@ -37,6 +39,7 @@ propagation/
 
 - Python 3.10 or later
 - pip
+- AWS credentials configured (`aws configure`) with DynamoDB access
 
 ### Steps
 
@@ -54,8 +57,9 @@ venv\Scripts\activate
 # macOS / Linux
 source venv/bin/activate
 
-# 3. Install dependencies
+# 3. Install dependencies (including boto3 for local DynamoDB access)
 pip install -r requirements.txt
+pip install boto3
 
 # 4. Run the development server
 python app.py
@@ -63,19 +67,74 @@ python app.py
 
 Open your browser to **http://127.0.0.1:5000**
 
-You will see a Flask development-server warning in the terminal — that is expected and harmless for local use. The warning does not appear when deployed on Lambda.
+The background thread pre-warms the 20m and 40m heatmap cache every 15 minutes and writes solar data to DynamoDB. You will see a Flask development-server warning — expected and harmless for local use.
 
-The background thread pre-warms the 20m and 40m heatmap cache every 15 minutes. Other bands compute on demand when you select them.
+### Local AWS credentials
+
+The app reads and writes DynamoDB on every request. Your local IAM user needs:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem"],
+    "Resource": "*"
+  }]
+}
+```
+
+---
+
+## AWS Setup
+
+### DynamoDB tables
+
+Create both tables in the AWS Console → DynamoDB → **Create table**:
+
+**Table 1 — Solar cache**
+
+| Setting | Value |
+|---|---|
+| Table name | `hf_solar` |
+| Partition key | `record_id` (String) |
+
+**Table 2 — Visitor tracking**
+
+| Setting | Value |
+|---|---|
+| Table name | `hf_users` |
+| Partition key | `session_id` (String) |
+
+Use default settings for both. Wait for status **Active** before deploying.
+
+### Lambda execution role
+
+1. Lambda console → your function → **Configuration** → **Permissions** → click the role name
+2. **Add permissions** → **Attach policies** → **Create inline policy** → JSON tab:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem"],
+    "Resource": "*"
+  }]
+}
+```
+
+3. Name it `hf-dynamodb-access` → **Create policy**
 
 ---
 
 ## AWS Lambda Deployment
 
-The app runs on Lambda behind a **Lambda Function URL** (no API Gateway required). A custom WSGI adapter in `app.py` translates Lambda Function URL payload v2.0 events directly into Flask WSGI calls — no third-party adapter library is needed.
+A custom WSGI adapter in `app.py` translates Lambda Function URL payload v2.0 events directly into Flask WSGI calls — no third-party adapter library required.
 
 ### Package the app
 
-Run this from the project root on Windows (PowerShell):
+**Windows (PowerShell):**
 
 ```powershell
 $root = "C:\path\to\propagation"
@@ -97,69 +156,36 @@ Compress-Archive -Path "$pkg\*" -DestinationPath $zip
 Write-Host "Done — $([math]::Round((Get-Item $zip).Length/1MB, 1)) MB"
 ```
 
-On macOS / Linux (bash):
+**macOS / Linux:**
 
 ```bash
 cd /path/to/propagation
-rm -rf lambda_package
-mkdir lambda_package
-
+rm -rf lambda_package && mkdir lambda_package
 pip install flask requests -t lambda_package --quiet
-
 cp app.py propagation.py lambda_package/
 cp -r templates lambda_package/
-
-cd lambda_package
-zip -r ../lambda.zip .
-cd ..
-echo "Done — $(du -sh lambda.zip)"
+cd lambda_package && zip -r ../lambda.zip . && cd ..
 ```
+
+> boto3 is NOT included in the zip — it is pre-installed in every Lambda Python runtime.
 
 ### Deploy in the AWS Console
 
-**1. Create the Lambda function**
-- Open **Lambda** in the AWS Console → **Create function**
-- Choose **Author from scratch**
-- Function name: `hf-propagation` (or your choice)
-- Runtime: **Python 3.12**
-- Architecture: **x86_64**
-- Click **Create function**
+1. **Create function** — Author from scratch, Python 3.12, x86_64
+2. **Upload zip** — Code tab → Upload from → .zip file → select `lambda.zip` → Save
+3. **Set handler** — Runtime settings → Edit → Handler: `app.handler` → Save
+4. **Set timeout/memory** — Configuration → General configuration → Memory: `512 MB`, Timeout: `30 sec`
+5. **Add Function URL** — Configuration → Function URL → Create → Auth type: NONE → Enable CORS → Allow origin: `*`, Allow methods: `*`, Allow headers: `content-type` → Save
 
-**2. Upload the zip**
-- **Code** tab → **Upload from** → **.zip file**
-- Select `lambda.zip` → **Save**
+Copy the generated Function URL — that is your public app address.
 
-**3. Set the handler**
-- **Code** tab → **Runtime settings** → **Edit**
-- Handler: `app.handler`
-- Click **Save**
-
-**4. Set timeout and memory**
-- **Configuration** tab → **General configuration** → **Edit**
-- Memory: `512 MB`
-- Timeout: `0 min 30 sec`
-- Click **Save**
-
-**5. Add a Function URL**
-- **Configuration** tab → **Function URL** → **Create function URL**
-- Auth type: **NONE** (public)
-- Enable **Configure CORS** → Allow origin: `*`
-- Click **Save**
-- Copy the generated URL — that is your public app address
-
-**6. Test**
-
-Open the Function URL in a browser. The first request (cold start) takes 3–5 seconds while Lambda initializes and fetches solar data. Subsequent requests within the same warm instance are fast.
-
-### Lambda sizing notes
+### Lambda sizing
 
 | Setting | Value | Reason |
 |---|---|---|
-| Memory | 512 MB | The heatmap loop runs ~1 800 trig calls per request |
+| Memory | 512 MB | Heatmap loop runs ~1,800 trig calls per request |
 | Timeout | 30 s | Allows for slow solar data fetches from hamqsl.com |
 | Runtime | Python 3.12 | Latest stable; no compiled extensions needed |
-
-The in-memory solar cache in `propagation.py` (10-minute TTL) works within a warm Lambda instance. Cold starts simply fetch fresh data on the first request.
 
 ---
 
@@ -167,7 +193,7 @@ The in-memory solar cache in `propagation.py` (10-minute TTL) works within a war
 
 ### Setting your QTH
 
-Click **Set QTH** at the bottom of the panel. Three entry methods are available:
+Click **Set QTH** at the bottom of the panel. Three entry methods:
 
 | Method | Input | Example |
 |---|---|---|
@@ -175,11 +201,9 @@ Click **Set QTH** at the bottom of the panel. Three entry methods are available:
 | **Lat/Lon** | Decimal degrees | `39.8`, `-98.6` |
 | **ZIP** | US ZIP code | `90210` |
 
-Your QTH is stored in localStorage and restored on the next visit.
+Your callsign and QTH are stored in browser localStorage and restored on every return visit.
 
 ### Selecting a band
-
-Use the **Band** dropdown at the top of the panel. Available bands:
 
 | Band | Frequency range |
 |---|---|
@@ -195,52 +219,35 @@ Use the **Band** dropdown at the top of the panel. Available bands:
 
 | Color | Meaning |
 |---|---|
-| **Bright green** | Band wide open — prime operating range (freq near MUF) |
+| **Bright green** | Band wide open — prime operating range |
 | **Yellow** | Good conditions |
 | **Orange** | Marginal — noisy but workable |
 | **Deep red** | Very low probability |
 | **No color** | Band closed to that area |
 
-The dashed circle on the map marks the **skip zone** — the region too close for reliable skywave propagation on the selected band.
-
-### Solar indices
-
-The four cards in the panel update automatically. Hover over any card for an explanation of what the index means and how it affects propagation.
-
-| Index | What it measures |
-|---|---|
-| **Solar Flux (SFI)** | 10.7 cm solar radio emission — primary driver of F2 layer ionization |
-| **K-index** | Short-term geomagnetic disturbance (0–9); high values degrade HF |
-| **A-index** | 24-hour geomagnetic activity average; > 30 indicates a storm |
-| **Sunspot Number** | Proxy for solar cycle phase |
-
-### Band conditions table
-
-Shows Good / Fair / Poor for each band by day and night, sourced directly from hamqsl.com's calculated conditions.
+The dashed circle marks the **skip zone** — too close for reliable skywave on the selected band.
 
 ### Antenna model
 
-Check **Use antenna** to apply an antenna pattern to the heatmap. The baseline (unchecked) is an isotropic reference — all directions equally weighted.
+Check **Use antenna** to apply antenna pattern to the heatmap. Unchecked = baseline (no directional weighting).
 
-| Antenna | What it models |
+| Antenna | Description |
 |---|---|
-| **Vertical** | Omnidirectional. λ/4 height = optimal. Shorter reduces efficiency; much taller shifts the pattern upward and hurts DX. |
-| **Dipole** | Figure-8 azimuth pattern. Set the wire orientation; the signal radiates broadside (90° to the wire). |
-| **Hex Beam** | ~60° beamwidth, ~6 dBd forward gain, ~19 dB front-to-back. Valid on 20m–10m only. Set the beam azimuth. |
+| **Vertical** | Omnidirectional. λ/4 height optimal. |
+| **Dipole** | Figure-8 pattern. Signal radiates broadside (90° to wire). |
+| **Hex Beam** | ~60° beamwidth, ~6 dBd gain, ~19 dB F/B. 20m–10m only. |
 
-Height affects the elevation pattern via ground-reflection image theory — higher is not always better for DX.
+### Refresh button
+
+The **Refresh Now** button is only visible when your callsign is **WB0Z**. It forces a fresh solar data fetch from hamqsl.com regardless of cache age, and updates DynamoDB so all users see the new data.
 
 ---
 
 ## API Reference
 
-The Flask backend exposes three endpoints, all returning JSON.
-
 ### `GET /heatmap/<band>`
 
-Returns a heatmap array for the specified band.
-
-**Path parameter:** `band` — one of `80m`, `60m`, `40m`, `20m`, `17m`, `15m`, `10m`
+Returns heatmap array for the specified band.
 
 **Query parameters:**
 
@@ -249,84 +256,115 @@ Returns a heatmap array for the specified band.
 | `lat` | 39.8 | Station latitude |
 | `lon` | -98.6 | Station longitude |
 | `antenna` | `vertical` | `vertical`, `dipole`, or `hex_beam` |
-| `height_ft` | 30 | Antenna height above ground in feet |
-| `azimuth` | 0 | Hex beam pointing direction (degrees, 0 = north) |
-| `dipole_orient` | 0 | Dipole wire azimuth (0 = N–S wire, 90 = E–W wire) |
+| `height_ft` | 30 | Antenna height in feet |
+| `azimuth` | 0 | Hex beam direction (degrees) |
+| `dipole_orient` | 0 | Dipole wire azimuth (0 = N–S, 90 = E–W) |
 
-**Response:** Array of `[lat, lon, strength]` triples where `strength` is 0.0–1.0.
-
-```json
-[[45, -90, 0.87], [45, -87, 0.91], ...]
-```
+**Response:** `[[lat, lon, strength], ...]` — strength is 0.0–1.0.
 
 ### `GET /solar`
 
-Returns the current solar indices.
+Returns current solar indices. Reads from DynamoDB cache; fetches fresh if cache is over 2 hours old.
 
 ```json
 {
-  "SFI": 152.0,
-  "K-index": 2.0,
-  "A-index": 8.0,
-  "Sunspot Number": 112.0,
-  "source": "hamqsl.com",
-  "stale": false,
-  "band_conditions": {
-    "80m-40m_day": "Good",
-    "20m-17m_day": "Fair"
-  },
-  "last_update": 1750000000.0
+  "SFI": 152.0, "K-index": 2.0, "A-index": 8.0, "Sunspot Number": 112.0,
+  "source": "hamqsl.com", "stale": false, "last_update": 1750000000.0,
+  "band_conditions": { "80m-40m_day": "Good", "20m-17m_day": "Fair" }
 }
 ```
+
+### `POST /solar/refresh`
+
+Forces a fresh solar fetch regardless of cache age. Updates DynamoDB. Returns same shape as `/solar`.
 
 ### `GET /zip/<zipcode>`
 
-Geocodes a US ZIP code.
+Geocodes a US ZIP code → `{zipcode, city, state, lat, lon}`.
 
-```json
-{
-  "zipcode": "90210",
-  "city": "Beverly Hills",
-  "state": "CA",
-  "lat": 34.0901,
-  "lon": -118.4065
-}
-```
+### `POST /track/visit`
+
+Body: `{"session_id": "<uuid>"}`. Increments `access_count`, updates `last_seen` and `ip_address`.
+
+### `POST /track/callsign`
+
+Body: `{"session_id": "<uuid>", "callsign": "W1AW"}`. Stores callsign on session row.
+
+### `POST /track/qth`
+
+Body: `{"session_id": "<uuid>", "lat": 39.8, "lon": -98.6, "method": "grid"}`. Stores QTH on session row.
+
+---
+
+## DynamoDB Schema
+
+### `hf_solar`
+
+| Attribute | Type | Description |
+|---|---|---|
+| `record_id` | String (PK) | Always `"current"` — single-row cache |
+| `SFI` | Number | Solar flux index |
+| `K-index` | Number | Geomagnetic K-index |
+| `A-index` | Number | Geomagnetic A-index |
+| `Sunspot Number` | Number | Daily sunspot count |
+| `source` | String | `"hamqsl.com"` or `"NOAA"` |
+| `band_conditions` | Map | Per-band day/night condition strings |
+| `timestamp` | String | ISO 8601 UTC write time |
+| `timestamp_epoch` | Number | Unix epoch — used for TTL comparison |
+
+### `hf_users`
+
+| Attribute | Type | Description |
+|---|---|---|
+| `session_id` | String (PK) | UUID from browser localStorage |
+| `callsign` | String | Amateur radio callsign (if entered) |
+| `ip_address` | String | Last seen IP address |
+| `first_seen` | String | ISO 8601 UTC — set once, never overwritten |
+| `last_seen` | String | ISO 8601 UTC — updated on every visit |
+| `access_count` | Number | Atomically incremented on every page load |
+| `qth_lat` | Number | Station latitude |
+| `qth_lon` | Number | Station longitude |
+| `qth_method` | String | `"grid"`, `"latlon"`, or `"zip"` |
 
 ---
 
 ## Propagation Model
 
-The model is implemented entirely in `propagation.py` using the Python standard library (no numpy or scipy).
+Implemented in `propagation.py` using the Python standard library only.
 
-**foF2 estimation** (`_estimate_fof2`): Empirical formula relating solar flux (SFI) to critical frequency. Includes latitude taper (equatorial F2 is thicker) and a diurnal cosine curve peaking at 14:00 local time with a nighttime floor at 45% of the daytime peak. Consistent with ITU/CCIR median tables.
+**foF2** — empirical formula: `base = 0.01×SFI + 3.5`, tapered by latitude (cos^0.4) and a diurnal cosine peaking at 14:00 local time with a 45% nighttime floor.
 
-**MUF calculation**: `MUF = foF2 × M-factor`, where M-factor scales with path length (3.2 for single-hop, 3.7 for two-hop, 4.1 for three-hop paths). The weakest hop along the path limits the MUF.
+**MUF** — `foF2 × M-factor` (3.2 single-hop / 3.7 two-hop / 4.1 three-hop). Limited by the weakest hop along the path.
 
-**Probabilistic strength**: Rather than a hard MUF cutoff, the model uses a smooth curve:
+**Strength curve** — probabilistic rather than hard cutoff:
+- `< 0.45×MUF` → 0 (D-layer absorption)
+- `0.45–0.85×MUF` → rising from 0 (below FOT, noisy)
+- `0.85–1.0×MUF` → 1.0 (optimal range)
+- `1.0–1.35×MUF` → falling (above nominal MUF, variability)
+- `> 1.35×MUF` → 0 (closed)
 
-- Below the LUF (0.45 × MUF): zero probability — D-layer absorption dominates
-- LUF → FOT (0.45–0.85 × MUF): rising probability (noisy path)
-- FOT → MUF (0.85–1.0 × MUF): 100% — optimal operating range
-- MUF → 1.35 × MUF: falling probability — natural foF2 variability means the band can still open
-- Above 1.35 × MUF: zero probability — genuinely closed
+**Geomagnetic penalty** — `1.0 − (K-index / 9) × 0.75` multiplied into all strengths.
 
-**Geomagnetic penalty**: `kp_penalty = 1.0 − (K-index / 9) × 0.75` — applied multiplicatively to all strengths.
-
-**Antenna factor** (`_antenna_factor`): Multiplicative modifier normalized so a λ/4 vertical = 1.0. Computes takeoff angle geometrically from F2 layer height (300 km) and per-hop path length, then applies elevation and azimuth patterns for the selected antenna type and height.
+**Antenna factor** — normalized so λ/4 vertical = 1.0. Takeoff angle computed from F2 layer height (300 km) and per-hop path length. Azimuth and elevation patterns applied for dipole and hex beam.
 
 ---
 
 ## Dependencies
+
+**Backend** (in `requirements.txt`):
 
 | Package | Purpose |
 |---|---|
 | `flask` | Web framework and template rendering |
 | `requests` | HTTP client for solar data fetches |
 
-All propagation math, XML parsing, and geometry use the Python standard library.
+**Lambda runtime** (pre-installed, not in zip):
 
-Frontend libraries loaded from CDN (no local install required):
+| Package | Purpose |
+|---|---|
+| `boto3` | AWS SDK — DynamoDB read/write |
+
+**Frontend** (CDN, no install):
 
 | Library | Purpose |
 |---|---|
