@@ -954,29 +954,17 @@ function getSessionId() {
   return sid;
 }
 
-function trackVisit() {
-  fetch('/track/visit', {
+function _postTrack(path, payload) {
+  fetch(path, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({session_id: getSessionId()}),
+    body: JSON.stringify({session_id: getSessionId(), ...payload}),
   }).catch(() => {});
 }
 
-function trackCallsign(callsign) {
-  fetch('/track/callsign', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({session_id: getSessionId(), callsign}),
-  }).catch(() => {});
-}
-
-function trackQTH(lat, lon, method) {
-  fetch('/track/qth', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({session_id: getSessionId(), lat, lon, method}),
-  }).catch(() => {});
-}
+function trackVisit()               { _postTrack('/track/visit',    {}); }
+function trackCallsign(callsign)    { _postTrack('/track/callsign', {callsign}); }
+function trackQTH(lat, lon, method) { _postTrack('/track/qth',      {lat, lon, method}); }
 
 function updateRefreshBtn() {
   const callsign = (localStorage.getItem(LS_CALL) || '').toUpperCase();

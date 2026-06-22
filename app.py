@@ -85,10 +85,11 @@ def _get_solar_db():
 def _put_solar_db(data):
     """Write solar data to DynamoDB hf_solar table."""
     try:
+        now = datetime.datetime.now(datetime.timezone.utc)
         item = _to_dynamo({k: v for k, v in data.items() if k != 'last_update'})
         item['record_id']       = 'current'
-        item['timestamp']       = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        item['timestamp_epoch'] = Decimal(str(time.time()))
+        item['timestamp']       = now.isoformat()
+        item['timestamp_epoch'] = Decimal(str(now.timestamp()))
         _solar_table.put_item(Item=item)
         print("[dynamo] solar cache written")
     except Exception as e:
@@ -103,46 +104,43 @@ def _fetch_and_cache_solar():
     return data
 
 
+def _update_solar_cache(data):
+    """Warm the in-process cache after any solar fetch."""
+    with _lock:
+        _cache['solar']       = data
+        _cache['last_update'] = data.get('last_update', time.time())
+
+
 # ── User tracking ──────────────────────────────────────────────────────────────
 
-def _track_visit(session_id, ip):
-    """Upsert a visit row — increments access_count, updates last_seen and IP."""
+def _upsert_user(session_id, ip, callsign=None):
+    """Upsert a session row — increments access_count, updates last_seen and IP.
+    Optionally sets callsign when provided."""
     if not session_id:
         return
     try:
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        set_expr = 'last_seen = :ts, ip_address = :ip, first_seen = if_not_exists(first_seen, :ts)'
+        values   = {':ts': now, ':ip': ip, ':one': 1}
+        if callsign:
+            set_expr = f'callsign = :cs, {set_expr}'
+            values[':cs'] = callsign
         _users_table.update_item(
             Key={'session_id': session_id},
-            UpdateExpression=(
-                'SET last_seen = :ts, ip_address = :ip, '
-                'first_seen = if_not_exists(first_seen, :ts) '
-                'ADD access_count :one'
-            ),
-            ExpressionAttributeValues={':ts': now, ':ip': ip, ':one': 1},
+            UpdateExpression=f'SET {set_expr} ADD access_count :one',
+            ExpressionAttributeValues=values,
         )
     except Exception as e:
-        print(f"[dynamo] track_visit error: {e}")
+        print(f"[dynamo] upsert_user error: {e}")
+
+
+def _track_visit(session_id, ip):
+    _upsert_user(session_id, ip)
 
 
 def _track_callsign(session_id, callsign, ip):
-    """Store callsign against the session."""
-    if not session_id or not callsign:
-        return
-    try:
-        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        _users_table.update_item(
-            Key={'session_id': session_id},
-            UpdateExpression=(
-                'SET callsign = :cs, last_seen = :ts, ip_address = :ip, '
-                'first_seen = if_not_exists(first_seen, :ts) '
-                'ADD access_count :one'
-            ),
-            ExpressionAttributeValues={
-                ':cs': callsign, ':ts': now, ':ip': ip, ':one': 1,
-            },
-        )
-    except Exception as e:
-        print(f"[dynamo] track_callsign error: {e}")
+    if callsign:
+        _upsert_user(session_id, ip, callsign=callsign)
 
 
 def _track_qth(session_id, lat, lon, method):
@@ -238,18 +236,8 @@ def track_qth():
 @app.route('/solar')
 def solar_data():
     try:
-        # 1. Try DynamoDB cache first
-        data = _get_solar_db()
-
-        # 2. Cache miss or expired — fetch fresh and update DynamoDB
-        if data is None:
-            data = _fetch_and_cache_solar()
-
-        # 3. Keep in-process cache warm for heatmap route
-        with _lock:
-            _cache['solar']       = data
-            _cache['last_update'] = data.get('last_update', time.time())
-
+        data = _get_solar_db() or _fetch_and_cache_solar()
+        _update_solar_cache(data)
         return jsonify(data)
     except Exception as e:
         return jsonify({'error': str(e), 'stale': True}), 500
@@ -260,9 +248,7 @@ def solar_refresh():
     """Force a fresh solar fetch regardless of cache age. WB0Z-only button calls this."""
     try:
         data = _fetch_and_cache_solar()
-        with _lock:
-            _cache['solar']       = data
-            _cache['last_update'] = data.get('last_update', time.time())
+        _update_solar_cache(data)
         return jsonify(data)
     except Exception as e:
         return jsonify({'error': str(e), 'stale': True}), 500
@@ -320,10 +306,9 @@ def heatmap(band):
                                  antenna_type=antenna_type, height_m=height_m,
                                  beam_azimuth=beam_azimuth, dipole_orient=dipole_orient)
         if same_loc and use_cache and band in ('20m', '40m'):
+            _update_solar_cache(solar)
             with _lock:
-                _cache['solar']       = solar
-                _cache[band]          = data
-                _cache['last_update'] = time.time()
+                _cache[band] = data
 
     return jsonify(data)
 

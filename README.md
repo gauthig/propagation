@@ -189,6 +189,54 @@ Copy the generated Function URL — that is your public app address.
 
 ---
 
+## Custom Domain via CloudFront
+
+A bare CNAME pointing to a Lambda Function URL does not work — Lambda validates the `Host` header and rejects requests where it doesn't match the Function URL hostname. The solution is a CloudFront distribution in front of Lambda.
+
+### Step 1 — ACM certificate
+
+Request a **wildcard certificate** in ACM so any subdomain is covered without needing a new cert each time.
+
+> Must be created in **us-east-1** regardless of where your Lambda lives — CloudFront only reads ACM certs from that region.
+
+1. ACM → **Request certificate** → Public → domain: `*.yourdomain.com`
+2. Validation method: **DNS validation**
+3. Add the validation CNAME to your DNS provider and wait for status **Issued**
+
+### Step 2 — CloudFront distribution
+
+1. CloudFront → **Create distribution**
+2. **Origin domain:** your Lambda Function URL — bare hostname only, no `https://`
+3. **Origin type:** Other (Custom origin)
+4. **Protocol:** HTTPS only
+5. **Allowed HTTP methods:** GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE
+6. **Cache policy:** CachingDisabled
+7. **Origin request policy:** AllViewerExceptHostHeader ← required — without this Lambda rejects every request
+8. **Alternate domain names:** your custom domain (e.g. `propagation.yourdomain.com`)
+9. **Custom SSL certificate:** select the ACM wildcard cert
+10. Create — takes 5–10 min to deploy
+
+### Step 3 — DNS (Cloudflare)
+
+Add a CNAME in Cloudflare pointing your subdomain to the CloudFront distribution domain:
+
+| Type | Name | Target | Proxy |
+|---|---|---|---|
+| CNAME | `propagation` | `d1234abcd.cloudfront.net` | **Grey cloud (DNS only)** |
+
+> The Cloudflare proxy (orange cloud) must be **off**. Two proxy layers conflict with CloudFront SSL and produce a 403.
+
+### Common pitfalls
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `{"Message": null}` | Bare CNAME to Lambda URL | Add CloudFront in front |
+| 403 from CloudFront | Origin request policy not set | Set to AllViewerExceptHostHeader |
+| `ERR_SSL_VERSION_OR_CIPHER_MISMATCH` | No cert covering the subdomain | Use wildcard cert `*.yourdomain.com` |
+| 403 persists after policy fix | Cloudflare proxy is orange | Set DNS record to grey cloud (DNS only) |
+
+---
+
 ## How to Use
 
 ### Setting your QTH
