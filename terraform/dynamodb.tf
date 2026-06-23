@@ -9,6 +9,14 @@ resource "aws_dynamodb_table" "hf_solar" {
     type = "S"
   }
 
+  # Auto-expire timestamped history rows (record_id != "current").
+  # The app writes an `expire_at` epoch on history rows; the "current"
+  # fast-lookup row omits it and is never expired.
+  ttl {
+    attribute_name = "expire_at"
+    enabled        = true
+  }
+
   tags = var.tags
 }
 

@@ -58,16 +58,36 @@ Any edit to `app.py`, `propagation.py`, or `templates/` requires rebuilding the 
 $pkg = "lambda_package"
 if (Test-Path $pkg) { Remove-Item $pkg -Recurse -Force }
 New-Item -ItemType Directory -Path $pkg | Out-Null
-pip install flask requests -t $pkg --quiet
+
+# numpy ships COMPILED binaries — a normal `pip install -t` on Windows would
+# package Windows .pyd files that crash on Lambda. Fetch the Linux (manylinux)
+# wheels instead. Lambda's Python 3.14 runs on Amazon Linux 2023 (glibc 2.34),
+# so the manylinux_2_28 numpy wheel is the right one. flask is pure-Python and
+# satisfies any platform under --only-binary.
+pip install --platform manylinux_2_28_x86_64 --implementation cp --python-version 3.14 `
+            --only-binary=:all: --target $pkg flask numpy --quiet
+
 Copy-Item app.py, propagation.py $pkg
 Copy-Item templates "$pkg\templates" -Recurse
-if (Test-Path lambda.zip) { Remove-Item lambda.zip -Force }
-Compress-Archive -Path "$pkg\*" -DestinationPath lambda.zip
+
+# OneDrive locks lambda.zip mid-sync — build in TEMP, then copy into the repo.
+$tmp = "$env:TEMP\lambda_build.zip"
+if (Test-Path $tmp) { Remove-Item $tmp -Force }
+Compress-Archive -Path "$pkg\*" -DestinationPath $tmp
+Copy-Item $tmp lambda.zip -Force
 $mb = [math]::Round((Get-Item lambda.zip).Length / 1MB, 1)
 Write-Host "Done — lambda.zip is $mb MB"
 ```
 
-Expected output: `Done — lambda.zip is ~3.1 MB`. `boto3` is intentionally excluded — it is pre-installed in the Lambda Python 3.14 runtime.
+Expected output: `Done — lambda.zip is ~22 MB` (numpy's compiled libraries are the
+bulk; still well under Lambda's 50 MB direct-upload / 250 MB unzipped limits).
+`requests` is no longer a dependency (replaced by stdlib `urllib`). `boto3` is
+intentionally excluded — it is pre-installed in the Lambda Python 3.14 runtime.
+
+⚠️ **Verify the numpy binaries are Linux, not Windows**, after building:
+`Get-ChildItem $pkg\numpy\_core\*.so` should list `.so` files (Linux). If you see
+`.pyd` files instead, the `--platform` flags were dropped and the zip will fail
+on Lambda with `ImportError: ... _multiarray_umath`.
 
 ### 2. Keep memory files in sync
 

@@ -1,5 +1,6 @@
 from flask import Flask, render_template, jsonify, request, make_response
-import requests
+import json
+import logging
 import threading
 import time
 import base64
@@ -9,13 +10,20 @@ import hashlib
 import secrets
 import hmac
 import os
+from collections import OrderedDict
 from decimal import Decimal
 from io import BytesIO
-from propagation import calculate_muf_map, get_solar_indices
+from propagation import calculate_muf_map, get_solar_indices, http_get, _NET_ERRORS
 
 import boto3
 
 app = Flask(__name__)
+
+# ── Logging ──────────────────────────────────────────────────────────────────
+# Default WARNING keeps CloudWatch quiet (and cheap) on the hot path; set
+# HF_LOG_LEVEL=DEBUG to surface the [auth]/[dynamo]/[refresh] traces.
+logging.basicConfig(level=os.environ.get('HF_LOG_LEVEL', 'WARNING').upper())
+log = logging.getLogger('hf')
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 DEFAULT_LAT = 39.8
@@ -76,21 +84,21 @@ def _decode_auth_cookie(val):
 def _get_current_user():
     val = request.cookies.get(AUTH_COOKIE, '')
     if not val:
-        print('[auth] no cookie')
+        log.debug('[auth] no cookie')
         return None
     callsign, token = _decode_auth_cookie(val)
     if not callsign:
-        print(f'[auth] cookie decode failed, raw={val[:30]}')
+        log.debug('[auth] cookie decode failed, raw=%s', val[:30])
         return None
     try:
         resp = _users_table.get_item(Key={'callsign': callsign})
         user = resp.get('Item')
         if not user:
-            print(f'[auth] callsign {callsign} not in DB')
+            log.debug('[auth] callsign %s not in DB', callsign)
             return None
         stored_token = user.get('auth_token', '')
         if not hmac.compare_digest(stored_token, token):
-            print(f'[auth] token mismatch for {callsign}')
+            log.debug('[auth] token mismatch for %s', callsign)
             return None
         exp = user.get('auth_expires', '')
         if exp:
@@ -98,14 +106,14 @@ def _get_current_user():
             if exp_dt.tzinfo is None:
                 exp_dt = exp_dt.replace(tzinfo=datetime.timezone.utc)
             if exp_dt < datetime.datetime.now(datetime.timezone.utc):
-                print(f'[auth] token expired for {callsign}')
+                log.debug('[auth] token expired for %s', callsign)
                 return None
         if user.get('active') is False:
-            print(f'[auth] account inactive: {callsign}')
+            log.debug('[auth] account inactive: %s', callsign)
             return None
         return _from_dynamo(user)
     except Exception as e:
-        print(f'[auth] get_current_user error: {e}')
+        log.warning('[auth] get_current_user error: %s', e)
         return None
 
 
@@ -123,9 +131,9 @@ def _set_auth_cookie(response, callsign, token):
 
 
 def _send_reset_email(email, callsign, token):
-    print(f'[auth] reset token for {callsign}: {token}')  # always log for debugging
+    log.info('[auth] reset token for %s: %s', callsign, token)  # info so it surfaces by default
     if not SES_SENDER_EMAIL:
-        print('[auth] SES_SENDER_EMAIL not configured — token logged above only')
+        log.warning('[auth] SES_SENDER_EMAIL not configured — token logged above only')
         return
     try:
         ses = boto3.client('ses', region_name=SES_REGION)
@@ -143,9 +151,9 @@ def _send_reset_email(email, callsign, token):
                 'Body': {'Text': {'Data': body}},
             },
         )
-        print(f'[auth] reset email sent to {email[:3]}***')
+        log.info('[auth] reset email sent to %s***', email[:3])
     except Exception as e:
-        print(f'[auth] SES send_email error: {e}')
+        log.warning('[auth] SES send_email error: %s', e)
         raise
 
 
@@ -180,7 +188,10 @@ def _from_dynamo(obj):
 
 
 # ── Solar DynamoDB history ─────────────────────────────────────────────────────
-SOLAR_MAX_ROWS = 100
+# History rows carry an `expire_at` epoch attribute; DynamoDB TTL deletes them
+# automatically (no Scan, no RCU cost). Enable TTL on the `expire_at` attribute
+# of the hf_solar table (configured in terraform/dynamodb.tf).
+SOLAR_HISTORY_TTL_DAYS = 7
 
 def _get_solar_db():
     """GetItem on 'current' — O(1), no Scan needed for the freshness check."""
@@ -191,41 +202,22 @@ def _get_solar_db():
             return None
         age = time.time() - float(item.get('timestamp_epoch', 0))
         if age > SOLAR_MAX_AGE_SECS:
-            print(f"[dynamo] solar data is {age/3600:.1f} h old — needs refresh")
+            log.debug("[dynamo] solar data is %.1f h old — needs refresh", age / 3600)
             return None
         data = _from_dynamo(item)
         data.pop('record_id', None)
+        data.pop('expire_at', None)
         data['last_update'] = data.pop('timestamp_epoch', time.time())
-        print(f"[dynamo] solar cache hit — age {age/60:.0f} min, by={data.get('refreshed_by','?')}")
+        log.debug("[dynamo] solar cache hit — age %.0f min, by=%s",
+                  age / 60, data.get('refreshed_by', '?'))
         return data
     except Exception as e:
-        print(f"[dynamo] solar read error: {e}")
+        log.warning("[dynamo] solar read error: %s", e)
         return None
 
 
-def _prune_solar_history():
-    """Scan history rows (excludes 'current') and delete oldest if over SOLAR_MAX_ROWS."""
-    try:
-        resp = _solar_table.scan(
-            FilterExpression='record_id <> :cur',
-            ExpressionAttributeValues={':cur': 'current'},
-            ProjectionExpression='record_id, timestamp_epoch',
-        )
-        items = resp.get('Items', [])
-        if len(items) <= SOLAR_MAX_ROWS:
-            return
-        items.sort(key=lambda x: float(x.get('timestamp_epoch', 0)))
-        to_delete = items[:len(items) - SOLAR_MAX_ROWS]
-        with _solar_table.batch_writer() as batch:
-            for item in to_delete:
-                batch.delete_item(Key={'record_id': item['record_id']})
-        print(f"[dynamo] pruned {len(to_delete)} old solar history rows")
-    except Exception as e:
-        print(f"[dynamo] solar prune error: {e}")
-
-
 def _put_solar_db(data, refreshed_by='auto'):
-    """Update 'current' fast-lookup row and append a timestamped history row."""
+    """Update 'current' fast-lookup row and append a TTL-expiring history row."""
     try:
         now = datetime.datetime.now(datetime.timezone.utc)
         base = _to_dynamo({k: v for k, v in data.items() if k != 'last_update'})
@@ -233,17 +225,18 @@ def _put_solar_db(data, refreshed_by='auto'):
         base['timestamp_epoch'] = Decimal(str(now.timestamp()))
         base['refreshed_by']    = refreshed_by or 'auto'
 
-        # Fast-lookup row — always GetItem('current') on reads
+        # Fast-lookup row — always GetItem('current') on reads (no TTL, never expires)
         _solar_table.put_item(Item={**base, 'record_id': 'current'})
 
-        # History row — timestamped, never overwritten
+        # History row — timestamped, auto-deleted by DynamoDB TTL after the window
         history_id = now.strftime('%Y-%m-%dT%H:%M:%S.%f') + 'Z'
-        _solar_table.put_item(Item={**base, 'record_id': history_id})
+        expire_at  = int(now.timestamp()) + SOLAR_HISTORY_TTL_DAYS * 86400
+        _solar_table.put_item(Item={**base, 'record_id': history_id, 'expire_at': expire_at})
 
-        print(f"[dynamo] solar written — current + history {history_id} by {base['refreshed_by']}")
-        _prune_solar_history()
+        log.debug("[dynamo] solar written — current + history %s by %s",
+                  history_id, base['refreshed_by'])
     except Exception as e:
-        print(f"[dynamo] solar write error: {e}")
+        log.warning("[dynamo] solar write error: %s", e)
 
 
 def _fetch_and_cache_solar(refreshed_by='auto'):
@@ -280,7 +273,7 @@ def _upsert_user(callsign, ip, session_id=None):
             ExpressionAttributeValues=values,
         )
     except Exception as e:
-        print(f"[dynamo] upsert_user error: {e}")
+        log.warning("[dynamo] upsert_user error: %s", e)
 
 
 def _track_visit(callsign, ip):
@@ -307,7 +300,7 @@ def _track_qth(callsign, lat, lon, method):
             },
         )
     except Exception as e:
-        print(f"[dynamo] track_qth error: {e}")
+        log.warning("[dynamo] track_qth error: %s", e)
 
 
 # ── In-process cache (warm Lambda instance / local dev) ───────────────────────
@@ -315,31 +308,68 @@ _lock  = threading.Lock()
 _cache = {
     'solar': None, 'last_update': None,
     'cache_lat': DEFAULT_LAT, 'cache_lon': DEFAULT_LON,
-    '20m': None, '40m': None,
 }
+
+# Params-keyed LRU for computed heatmaps. A warm Lambda instance (or local dev)
+# serves repeat requests for the same band/QTH/antenna/solar instantly instead of
+# recomputing the full grid. Keyed on every input that changes the map, including
+# the UTC hour (the model is time-of-day dependent) so entries self-invalidate.
+_HEATMAP_CACHE_MAX = 32
+_heatmap_cache = OrderedDict()
+
+
+def _heatmap_key(band, lat, lon, antenna_type, height_m, beam_azimuth, dipole_orient, solar):
+    return (
+        band,
+        round(lat * 2) / 2, round(lon * 2) / 2,        # snap QTH to 0.5° to avoid thrash
+        antenna_type, round(height_m, 1),
+        round(beam_azimuth, 1) if beam_azimuth is not None else -1.0,
+        round(dipole_orient, 1),
+        round(float(solar.get('SFI', 100))),
+        round(float(solar.get('K-index', 2)), 1),
+        datetime.datetime.now(datetime.timezone.utc).hour,
+    )
+
+
+def _compute_heatmap(band, lat, lon, solar, antenna_type='vertical', height_m=10.0,
+                     beam_azimuth=None, dipole_orient=0.0):
+    """Return a heatmap from the LRU cache, computing+caching on miss."""
+    key = _heatmap_key(band, lat, lon, antenna_type, height_m, beam_azimuth, dipole_orient, solar)
+    with _lock:
+        data = _heatmap_cache.get(key)
+        if data is not None:
+            _heatmap_cache.move_to_end(key)
+            return data
+
+    freq_min, freq_max = BAND_FREQS[band]
+    data = calculate_muf_map(lat, lon, freq_min, freq_max, solar,
+                             antenna_type=antenna_type, height_m=height_m,
+                             beam_azimuth=beam_azimuth, dipole_orient=dipole_orient)
+    with _lock:
+        _heatmap_cache[key] = data
+        _heatmap_cache.move_to_end(key)
+        while len(_heatmap_cache) > _HEATMAP_CACHE_MAX:
+            _heatmap_cache.popitem(last=False)
+    return data
 
 
 def _refresh_loop():
-    """Local dev background thread — pre-warms 20m/40m heatmap every 15 min."""
+    """Local dev background thread — keeps solar fresh and pre-warms 20m/40m."""
     while True:
         try:
-            print("[refresh] fetching solar indices...")
+            log.info("[refresh] fetching solar indices...")
             solar = _fetch_and_cache_solar()
             with _lock:
                 lat = _cache['cache_lat']
                 lon = _cache['cache_lon']
-            print("[refresh] pre-computing 20m and 40m...")
-            data_20m = calculate_muf_map(lat, lon, *BAND_FREQS['20m'], solar)
-            data_40m = calculate_muf_map(lat, lon, *BAND_FREQS['40m'], solar)
-            with _lock:
                 _cache['solar']       = solar
-                _cache['20m']         = data_20m
-                _cache['40m']         = data_40m
                 _cache['last_update'] = time.time()
-            print(f"[refresh] done — 20m={len(data_20m)} pts, 40m={len(data_40m)} pts")
-        except Exception as e:
-            print(f"[refresh] ERROR: {e}")
-            import traceback; traceback.print_exc()
+            log.info("[refresh] pre-computing 20m and 40m...")
+            d20 = _compute_heatmap('20m', lat, lon, solar)
+            d40 = _compute_heatmap('40m', lat, lon, solar)
+            log.info("[refresh] done — 20m=%d pts, 40m=%d pts", len(d20), len(d40))
+        except Exception:
+            log.exception("[refresh] ERROR")
         time.sleep(REFRESH_INTERVAL)
 
 
@@ -424,7 +454,7 @@ def auth_login():
         }))
         return _set_auth_cookie(resp, callsign, token)
     except Exception as e:
-        print(f'[auth] login error: {e}')
+        log.warning('[auth] login error: %s', e)
         return jsonify({'error': 'server_error'}), 500
 
 
@@ -461,7 +491,7 @@ def auth_register():
         resp = make_response(jsonify({'ok': True, 'callsign': callsign, 'admin': False}))
         return _set_auth_cookie(resp, callsign, token)
     except Exception as e:
-        print(f'[auth] register error: {e}')
+        log.warning('[auth] register error: %s', e)
         return jsonify({'error': 'server_error'}), 500
 
 
@@ -508,7 +538,7 @@ def auth_reset_request():
         masked = stored_email[:2] + '***@' + stored_email.split('@')[-1] if '@' in stored_email else stored_email[:3] + '***'
         return jsonify({'ok': True, 'email_masked': masked})
     except Exception as e:
-        print(f'[auth] reset_request error: {e}')
+        log.warning('[auth] reset_request error: %s', e)
         return jsonify({'error': 'server_error'}), 500
 
 
@@ -547,7 +577,7 @@ def auth_reset_confirm():
         resp = make_response(jsonify({'ok': True, 'callsign': callsign, 'admin': bool(item.get('admin', False))}))
         return _set_auth_cookie(resp, callsign, new_tok)
     except Exception as e:
-        print(f'[auth] reset_confirm error: {e}')
+        log.warning('[auth] reset_confirm error: %s', e)
         return jsonify({'error': 'server_error'}), 500
 
 
@@ -569,7 +599,7 @@ def admin_list_users():
         )
         return jsonify(users)
     except Exception as e:
-        print(f'[admin] list_users error: {e}')
+        log.warning('[admin] list_users error: %s', e)
         return jsonify({'error': str(e)}), 500
 
 
@@ -684,28 +714,15 @@ def heatmap(band):
     except (TypeError, ValueError):
         dipole_orient = 0.0
 
-    use_cache = (antenna_type == 'vertical')
-
     with _lock:
-        solar     = _cache['solar']
-        cache_lat = _cache['cache_lat']
-        cache_lon = _cache['cache_lon']
-        same_loc  = (abs(req_lat - cache_lat) < 0.5 and abs(req_lon - cache_lon) < 0.5)
-        data      = _cache.get(band) if (same_loc and use_cache) else None
+        solar = _cache['solar']
+    if solar is None:
+        solar = _get_solar_db() or _fetch_and_cache_solar()
+        _update_solar_cache(solar)
 
-    if solar is None or data is None:
-        # Pull solar from DynamoDB if not in process cache
-        if solar is None:
-            solar = _get_solar_db() or _fetch_and_cache_solar()
-        freq_min, freq_max = BAND_FREQS[band]
-        data = calculate_muf_map(req_lat, req_lon, freq_min, freq_max, solar,
-                                 antenna_type=antenna_type, height_m=height_m,
-                                 beam_azimuth=beam_azimuth, dipole_orient=dipole_orient)
-        if same_loc and use_cache and band in ('20m', '40m'):
-            _update_solar_cache(solar)
-            with _lock:
-                _cache[band] = data
-
+    data = _compute_heatmap(band, req_lat, req_lon, solar,
+                            antenna_type=antenna_type, height_m=height_m,
+                            beam_azimuth=beam_azimuth, dipole_orient=dipole_orient)
     return jsonify(data)
 
 
@@ -716,16 +733,16 @@ def zip_lookup(zipcode):
     if not zipcode.isdigit() or len(zipcode) > 5:
         return jsonify({'error': 'Invalid ZIP code format'}), 400
     try:
-        r = requests.get(
+        status, body = http_get(
             f'https://api.zippopotam.us/us/{zipcode}',
             timeout=8,
             headers={'User-Agent': 'hf-propagation/1.0'},
         )
-        if r.status_code == 404:
+        if status == 404:
             return jsonify({'error': f'ZIP code {zipcode} not found'}), 404
-        if not r.ok:
+        if not (200 <= status < 400) or not body:
             return jsonify({'error': 'ZIP lookup service unavailable'}), 502
-        d     = r.json()
+        d     = json.loads(body)
         place = d['places'][0]
         return jsonify({
             'zipcode': zipcode,
@@ -734,7 +751,7 @@ def zip_lookup(zipcode):
             'lat':     float(place['latitude']),
             'lon':     float(place['longitude']),
         })
-    except requests.RequestException as e:
+    except _NET_ERRORS as e:
         return jsonify({'error': f'Network error: {e}'}), 502
     except (KeyError, IndexError, ValueError):
         return jsonify({'error': 'Unexpected response from ZIP service'}), 500

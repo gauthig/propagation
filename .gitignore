@@ -1,0 +1,26 @@
+# ── Build artifacts ──────────────────────────────────────────
+# Lambda deployment package — rebuilt from app.py/propagation.py/templates
+lambda_package/
+lambda.zip
+
+# ── Python ───────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# ── Virtualenv ───────────────────────────────────────────────
+venv/
+.venv/
+
+# ── Terraform ────────────────────────────────────────────────
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/.terraform.lock.hcl
+terraform/terraform.tfvars
+
+# ── Local / editor ───────────────────────────────────────────
+.env
+*.log
+.DS_Store
