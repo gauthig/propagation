@@ -49,7 +49,7 @@
 
     /* Band dropdown */
     .field-row { display:flex; align-items:center; gap:8px; margin-bottom:12px; }
-    .field-label { font-size:0.7rem; color:#64748b; text-transform:uppercase;
+    .field-label { font-size:0.76rem; color:#94a3b8; text-transform:uppercase;
                    letter-spacing:0.05em; white-space:nowrap; }
     #band-select, .ant-select {
       background:rgba(255,255,255,0.06); border:1px solid #334155;
@@ -60,12 +60,12 @@
     #band-select:focus, .ant-select:focus { border-color:#38bdf8; }
     #band-select option, .ant-select option { background:#1e293b; }
     .ant-row { display:flex; gap:6px; margin-bottom:7px; align-items:center; }
-    .ant-label { font-size:0.68rem; color:#64748b; text-transform:uppercase;
+    .ant-label { font-size:0.74rem; color:#94a3b8; text-transform:uppercase;
                  letter-spacing:0.05em; white-space:nowrap; }
     #ant-controls { transition:opacity 0.18s; }
     #ant-controls.ant-off { opacity:0.30; pointer-events:none; user-select:none; }
     #ant-enable-wrap { display:flex; align-items:center; gap:5px; margin-left:auto;
-                       font-size:0.68rem; color:#64748b; cursor:pointer;
+                       font-size:0.74rem; color:#8b949e; cursor:pointer;
                        text-transform:none; letter-spacing:0; font-weight:normal; }
     #ant-enable { accent-color:#38bdf8; cursor:pointer; }
 
@@ -77,26 +77,26 @@
       transition:border-color 0.15s;
     }
     .idx-card:hover { border-color:rgba(56,189,248,0.35); }
-    .idx-label { font-size:0.62rem; text-transform:uppercase; letter-spacing:0.06em;
-                 color:#64748b; display:block; margin-bottom:2px; }
+    .idx-label { font-size:0.69rem; text-transform:uppercase; letter-spacing:0.06em;
+                 color:#94a3b8; display:block; margin-bottom:2px; }
     .idx-value { font-size:1.1rem; font-weight:700; color:#e2e8f0; }
 
     /* Band conditions table */
-    .bc-table { width:100%; border-collapse:collapse; font-size:0.68rem; margin-bottom:10px; }
-    .bc-table th { color:#475569; text-transform:uppercase; font-size:0.58rem;
+    .bc-table { width:100%; border-collapse:collapse; font-size:0.73rem; margin-bottom:10px; }
+    .bc-table th { color:#8b949e; text-transform:uppercase; font-size:0.65rem;
                    letter-spacing:0.05em; padding:3px 4px; text-align:left;
                    border-bottom:1px solid rgba(255,255,255,0.06); }
     .bc-table td { padding:3px 4px; vertical-align:middle; }
     .bc-band { color:#94a3b8; }
     .cond-pill { padding:1px 6px; border-radius:10px; font-weight:700;
-                 font-size:0.62rem; text-transform:uppercase; letter-spacing:0.04em; display:inline-block; }
+                 font-size:0.67rem; text-transform:uppercase; letter-spacing:0.04em; display:inline-block; }
     .cond-Good    { background:rgba(34,197,94,0.18);  color:#4ade80; border:1px solid #166534; }
     .cond-Fair    { background:rgba(234,179,8,0.18);  color:#fbbf24; border:1px solid #713f12; }
     .cond-Poor    { background:rgba(239,68,68,0.18);  color:#f87171; border:1px solid #7f1d1d; }
     .cond-Unknown { background:rgba(100,116,139,0.18);color:#94a3b8; border:1px solid #334155; }
 
     .divider { border:none; border-top:1px solid rgba(255,255,255,0.07); margin:10px 0; }
-    .section-label { font-size:0.62rem; color:#475569; text-transform:uppercase;
+    .section-label { font-size:0.69rem; color:#94a3b8; text-transform:uppercase;
                      letter-spacing:0.05em; margin-bottom:6px; }
 
     /* Refresh / status */
@@ -108,14 +108,14 @@
     }
     #refresh-btn:hover:not(:disabled) { border-color:#38bdf8; color:#38bdf8; background:rgba(56,189,248,0.08); }
     #refresh-btn:disabled { opacity:0.45; cursor:default; }
-    #status { font-size:0.63rem; color:#475569; text-align:center; line-height:1.4; }
+    #status { font-size:0.69rem; color:#8b949e; text-align:center; line-height:1.4; }
     #status.stale { color:#f87171; }
 
     /* QTH section */
     .method-group { display:flex; gap:4px; margin-bottom:8px; }
     .method-btn {
       flex:1; padding:4px 0; border:1px solid #334155; background:transparent;
-      color:#64748b; font-size:0.72rem; border-radius:4px; cursor:pointer;
+      color:#8b949e; font-size:0.77rem; border-radius:4px; cursor:pointer;
       transition:all 0.15s; font-family:inherit;
     }
     .method-btn.active { border-color:#38bdf8; background:rgba(56,189,248,0.12); color:#38bdf8; }
@@ -157,15 +157,15 @@
       position:absolute; bottom:28px; right:12px; z-index:1000;
       background:rgba(10,14,22,0.90); backdrop-filter:blur(6px);
       border:1px solid rgba(255,255,255,0.10); border-radius:8px;
-      padding:10px 14px; color:#94a3b8; font-size:0.7rem;
+      padding:10px 14px; color:#94a3b8; font-size:0.76rem;
     }
-    #legend strong { display:block; color:#e2e8f0; font-size:0.72rem;
-                     margin-bottom:6px; letter-spacing:0.04em; text-transform:uppercase; }
-    .legend-bar { width:140px; height:12px; border-radius:4px;
+    #legend strong { display:block; color:#e2e8f0; font-size:0.78rem;
+                     margin-bottom:7px; letter-spacing:0.04em; text-transform:uppercase; }
+    .legend-bar { width:160px; height:13px; border-radius:4px;
       background:linear-gradient(to right,#660000,#cc2200 25%,#ff8800 50%,#ffdd00 75%,#00ff44 100%);
-      margin-bottom:4px; }
-    .legend-labels { display:flex; justify-content:space-between; color:#64748b; }
-    .legend-row { margin-top:7px; color:#64748b; display:flex; align-items:center; gap:6px; }
+      margin-bottom:5px; }
+    .legend-labels { display:flex; justify-content:space-between; color:#94a3b8; font-size:0.72rem; }
+    .legend-row { margin-top:8px; color:#94a3b8; font-size:0.73rem; display:flex; align-items:center; gap:6px; }
 
     /* ── Loading overlay ────────────────────────────────────── */
     #loading {
@@ -279,7 +279,7 @@
 
     /* ── Callsign badge — login state ───────────────────── */
     #callsign-badge.badge-login {
-      color:#64748b; font-weight:400; letter-spacing:0.02em; cursor:pointer;
+      color:#94a3b8; font-weight:400; letter-spacing:0.02em; cursor:pointer;
     }
     #callsign-badge.badge-login:hover { color:#94a3b8; text-decoration:underline; }
 
@@ -294,6 +294,40 @@
       font-family:inherit; display:none;
     }
     #admin-tab-btn:hover { background:rgba(239,68,68,0.10); }
+
+    /* ── Solar timestamp box (top-right) ───────────────────── */
+    #solar-ts {
+      position:absolute; top:12px; right:12px; z-index:1000;
+      background:rgba(10,14,22,0.90); backdrop-filter:blur(6px);
+      border:1px solid rgba(255,255,255,0.10); border-radius:8px;
+      padding:8px 12px; text-align:right;
+    }
+    #solar-ts-label { font-size:0.58rem; color:#64748b; text-transform:uppercase;
+                      letter-spacing:0.05em; margin-bottom:3px; }
+    #solar-ts-utc   { font-size:0.68rem; color:#e2e8f0; }
+    #solar-ts-local { font-size:0.62rem; color:#94a3b8; margin-top:2px; }
+
+    /* ── Login teaser (panel body, not-logged-in state) ──────── */
+    #login-teaser {
+      background:rgba(56,189,248,0.05); border:1px solid rgba(56,189,248,0.15);
+      border-radius:7px; padding:10px 12px; margin-bottom:12px;
+    }
+    #login-teaser p {
+      font-size:0.72rem; color:#94a3b8; margin:0 0 7px; line-height:1.45;
+    }
+    #login-teaser ul {
+      margin:0 0 10px; padding-left:14px;
+      font-size:0.7rem; color:#8b949e; line-height:1.5;
+    }
+    #login-teaser li { margin-bottom:2px; }
+    #login-teaser-btn {
+      width:100%; padding:7px 0; border:1px solid #38bdf8;
+      background:rgba(56,189,248,0.10); color:#38bdf8; font-size:0.78rem;
+      border-radius:5px; cursor:pointer; font-family:inherit; font-weight:600;
+      transition:all 0.15s;
+    }
+    #login-teaser-btn:hover { background:rgba(56,189,248,0.22); }
+    #login-teaser-free { font-size:0.6rem; color:#64748b; text-align:center; margin-top:6px; }
 
     /* ── Privacy link ───────────────────────────────────── */
     #privacy-link {
@@ -317,6 +351,56 @@
       padding:2px 9px; border-radius:4px; font-size:0.66rem; cursor:pointer;
       font-family:inherit; font-weight:600; transition:all 0.15s; margin-left:4px;
     }
+
+    /* ── Band display (top-center) ──────────────────────────── */
+    #band-display {
+      position:absolute; top:10px; left:50%; transform:translateX(-50%);
+      z-index:999; text-align:center; pointer-events:none;
+      white-space:nowrap;
+    }
+    #band-display-header {
+      display:flex; align-items:center; justify-content:center;
+      gap:10px; margin-bottom:5px; pointer-events:auto;
+    }
+    #band-display-name {
+      font-size:1.5rem; font-weight:800; color:#e2e8f0;
+      letter-spacing:0.10em; text-transform:uppercase;
+      text-shadow:0 2px 10px rgba(0,0,0,0.9), 0 0 20px rgba(56,189,248,0.25);
+      line-height:1;
+    }
+    #band-plan-toggle {
+      background:rgba(10,14,22,0.80); border:1px solid rgba(255,255,255,0.18);
+      color:#94a3b8; font-size:1rem; cursor:pointer; pointer-events:auto;
+      padding:3px 9px; border-radius:6px; line-height:1; flex-shrink:0;
+      transition:all 0.15s;
+    }
+    #band-plan-toggle:hover { border-color:#38bdf8; color:#38bdf8; }
+    #band-plan-container {
+      background:rgba(10,14,22,0.90); backdrop-filter:blur(6px);
+      border:1px solid rgba(255,255,255,0.10); border-radius:8px;
+      padding:8px 12px; white-space:normal;
+      width:min(calc(100vw - 320px), 920px);
+      pointer-events:auto;
+    }
+    #band-plan-container.bp-collapsed { display:none; }
+
+    /* ── Header mini-teaser (not-logged-in) ─────────────────── */
+    #header-teaser-mini {
+      font-size:0.61rem; color:#94a3b8; margin-top:4px;
+      line-height:1.35; cursor:pointer; pointer-events:auto;
+    }
+    #header-teaser-mini:hover { color:#38bdf8; text-decoration:underline; }
+
+    /* ── Lock controls when not logged in ───────────────────── */
+    #panel-body.panel-locked #band-select,
+    #panel-body.panel-locked #ant-enable,
+    #panel-body.panel-locked #ant-controls,
+    #panel-body.panel-locked .method-btn,
+    #panel-body.panel-locked .qth-input,
+    #panel-body.panel-locked #set-qth-btn {
+      opacity: 0.28;
+      pointer-events: none;
+    }
   </style>
 </head>
 <body>
@@ -331,7 +415,8 @@
   <div id="panel-header">
     <div>
       <h1>HF Propagation</h1>
-      <div id="callsign-badge" onclick="onBadgeClick()" title="Click to sign in / edit callsign">Open to login</div>
+      <div id="callsign-badge" onclick="onBadgeClick()" title="Click to sign in / edit callsign">Sign In / Register</div>
+      <div id="header-teaser-mini" onclick="showLoginModal()" style="display:none">Sign in to change bands, QTH &amp; antenna</div>
     </div>
     <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
       <button id="help-btn" onclick="showHelp()" title="Help / About">?</button>
@@ -341,6 +426,18 @@
 
   <div id="panel-body" class="collapsed">
 
+    <!-- Login teaser — hidden once signed in -->
+    <div id="login-teaser">
+      <p>Sign in or register to:</p>
+      <ul>
+        <li>Change HF bands</li>
+        <li>Set your QTH location</li>
+        <li>Configure antenna model</li>
+      </ul>
+      <button id="login-teaser-btn" onclick="showLoginModal()">Login / Register</button>
+      <div id="login-teaser-free">Registration is free — no spam, ever.</div>
+    </div>
+
     <!-- Band selector -->
     <div class="field-row">
       <span class="field-label">Band</span>
@@ -348,6 +445,7 @@
         <option value="80m">80m  (3.5 – 4.0 MHz)</option>
         <option value="60m">60m  (5.3 – 5.4 MHz)</option>
         <option value="40m" selected>40m  (7.0 – 7.3 MHz)</option>
+        <option value="30m">30m (10.1 – 10.15 MHz)</option>
         <option value="20m">20m (14.0 – 14.35 MHz)</option>
         <option value="17m">17m (18.07 – 18.17 MHz)</option>
         <option value="15m">15m (21.0 – 21.45 MHz)</option>
@@ -472,6 +570,24 @@
 
   </div><!-- /panel-body -->
 </div><!-- /panel -->
+
+<!-- ── Solar timestamp (top-right) ─────────────────────────── -->
+<div id="solar-ts">
+  <div id="solar-ts-label">Solar data as of</div>
+  <div id="solar-ts-utc">—</div>
+  <div id="solar-ts-local">—</div>
+</div>
+
+<!-- ── Band display (top-center) ─────────────────────────── -->
+<div id="band-display">
+  <div id="band-display-header">
+    <div id="band-display-name">40M</div>
+    <button id="band-plan-toggle" onclick="toggleBandPlan()" title="Show/hide band plan">☰</button>
+  </div>
+  <div id="band-plan-container">
+    <div id="band-plan-svg"></div>
+  </div>
+</div>
 
 <!-- ── Tooltip box ──────────────────────────────────────────── -->
 <div id="tip-box">
@@ -735,9 +851,124 @@ const WORLD_URL     = 'https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m
 
 // Center frequency (MHz) for each band — used for skip-zone calculation
 const BAND_FREQ = {
-  '80m': 3.750, '60m': 5.370, '40m': 7.150,
+  '80m': 3.750, '60m': 5.370, '40m': 7.150, '30m': 10.125,
   '20m': 14.175, '17m': 18.118, '15m': 21.225, '10m': 28.850,
 };
+
+// ── ARRL band plan data (FCC Part 97) ────────────────────────────────────
+// range in kHz; priv = E(Extra) G(General) T(Technician) privilege segments
+const BAND_PLAN = {
+  '80m': {
+    range:[3500,4000],
+    modes:[{start:3500,end:3600,type:'cw_data',label:'CW / Data'},{start:3600,end:4000,type:'phone',label:'Phone / CW'}],
+    priv:{E:[{start:3500,end:4000}],G:[{start:3525,end:3600},{start:3600,end:4000}],T:[{start:3525,end:3600}]}
+  },
+  '60m': {
+    range:[5330,5406],channelized:[5330.5,5346.5,5357.0,5371.5,5403.5],
+    modes:[{start:5330,end:5406,type:'phone',label:'USB / CW (5 channels)'}],
+    priv:{E:[{start:5330,end:5406}],G:[{start:5330,end:5406}],T:[]}
+  },
+  '40m': {
+    range:[7000,7300],
+    modes:[{start:7000,end:7125,type:'cw_data',label:'CW / Data'},{start:7125,end:7300,type:'phone',label:'Phone / CW'}],
+    priv:{E:[{start:7000,end:7300}],G:[{start:7025,end:7125},{start:7175,end:7300}],T:[{start:7025,end:7125}]}
+  },
+  '30m': {
+    range:[10100,10150],
+    modes:[{start:10100,end:10130,type:'cw',label:'CW'},{start:10130,end:10150,type:'data',label:'RTTY / Data'}],
+    priv:{E:[{start:10100,end:10150}],G:[{start:10100,end:10150}],T:[]}
+  },
+  '20m': {
+    range:[14000,14350],
+    modes:[{start:14000,end:14150,type:'cw_data',label:'CW / Data'},{start:14150,end:14350,type:'phone',label:'Phone / CW'}],
+    priv:{E:[{start:14000,end:14350}],G:[{start:14025,end:14150},{start:14225,end:14350}],T:[]}
+  },
+  '17m': {
+    range:[18068,18168],
+    modes:[{start:18068,end:18110,type:'cw_data',label:'CW / Data'},{start:18110,end:18168,type:'phone',label:'Phone / CW'}],
+    priv:{E:[{start:18068,end:18168}],G:[{start:18068,end:18168}],T:[]}
+  },
+  '15m': {
+    range:[21000,21450],
+    modes:[{start:21000,end:21200,type:'cw_data',label:'CW / Data'},{start:21200,end:21450,type:'phone',label:'Phone / CW'}],
+    priv:{E:[{start:21000,end:21450}],G:[{start:21025,end:21200},{start:21275,end:21450}],T:[{start:21025,end:21200}]}
+  },
+  '10m': {
+    range:[28000,29700],
+    modes:[{start:28000,end:28300,type:'cw_data',label:'CW / Data'},{start:28300,end:29700,type:'phone',label:'Phone / CW'}],
+    priv:{E:[{start:28000,end:29700}],G:[{start:28000,end:29700}],T:[{start:28000,end:28500}]}
+  },
+};
+
+function renderBandPlan(band) {
+  const plan = BAND_PLAN[band];
+  const el   = document.getElementById('band-plan-svg');
+  if (!plan || !el) return;
+
+  const CX = 8, CW = 560;
+  const modeH = 24;
+  const tickH = 6;
+  const labY  = modeH + tickH + 10;
+  const legY  = labY + 17;
+  const totalH = legY + 13;
+
+  const [fMin,fMax] = plan.range;
+  const sc = CW / (fMax - fMin);
+  const px = f => CX + (f - fMin) * sc;
+  const pw = (a,b) => (b - a) * sc;
+
+  const MC = {cw:'#f59e0b', cw_data:'#38bdf8', data:'#06b6d4', phone:'#4ade80'};
+  const fmtMHz = f => (f/1000).toFixed(3).replace(/0+$/, '').replace(/\.$/, '.0');
+
+  let s = '';
+
+  // ── Mode bar ──────────────────────────────────────────────
+  s += `<rect x="${CX}" y="0" width="${CW}" height="${modeH}" fill="#131c2e" rx="4"/>`;
+  plan.modes.forEach(m => {
+    const col = MC[m.type] || '#94a3b8';
+    const bw  = pw(m.start, m.end);
+    const bx  = px(m.start);
+    s += `<rect x="${bx.toFixed(1)}" y="0" width="${bw.toFixed(1)}" height="${modeH}" fill="${col}" fill-opacity="0.88" rx="3"/>`;
+    if (bw > 40 && m.label) {
+      const cx = bx + bw/2;
+      s += `<text x="${cx.toFixed(1)}" y="${modeH/2+4}" text-anchor="middle" fill="#0a0f1a" font-size="10" font-weight="700" font-family="ui-monospace,monospace">${m.label}</text>`;
+    }
+  });
+  if (plan.channelized) {
+    plan.channelized.forEach(f => {
+      const xc = px(f);
+      s += `<line x1="${xc.toFixed(1)}" y1="0" x2="${xc.toFixed(1)}" y2="${modeH}" stroke="#fbbf24" stroke-width="2.5"/>`;
+    });
+  }
+
+  // ── Frequency labels at segment boundaries ────────────────
+  const freqSet = new Set([fMin, fMax]);
+  plan.modes.forEach(m => { freqSet.add(m.start); freqSet.add(m.end); });
+  const freqs = [...freqSet].sort((a,b) => a-b);
+  const shown = [];
+  freqs.forEach(f => {
+    const xp = px(f);
+    if (!shown.length || xp - px(shown[shown.length-1]) >= 50) shown.push(f);
+  });
+  shown.forEach(f => {
+    const xp  = px(f);
+    const anc = xp <= CX+8 ? 'start' : xp >= CX+CW-8 ? 'end' : 'middle';
+    s += `<line x1="${xp.toFixed(1)}" y1="${modeH}" x2="${xp.toFixed(1)}" y2="${modeH+tickH}" stroke="#2d3f5a" stroke-width="1.5"/>`;
+    s += `<text x="${xp.toFixed(1)}" y="${labY}" text-anchor="${anc}" fill="#94a3b8" font-size="10" font-family="ui-monospace,monospace">${fmtMHz(f)} MHz</text>`;
+  });
+
+  // ── Legend ────────────────────────────────────────────────
+  const legItems = [[MC.cw,'CW'],[MC.cw_data,'CW / Data'],[MC.data,'Data'],[MC.phone,'Phone']];
+  let lx = CX;
+  legItems.forEach(([col, lbl]) => {
+    s += `<rect x="${lx}" y="${legY-8}" width="12" height="10" fill="${col}" fill-opacity="0.90" rx="2"/>`;
+    s += `<text x="${lx+15}" y="${legY+1}" fill="#94a3b8" font-size="10" font-family="ui-monospace,monospace">${lbl}</text>`;
+    lx += 15 + lbl.length * 6.5 + 10;
+  });
+
+  const vbW = CX + CW + 4;
+  el.innerHTML = `<svg viewBox="0 0 ${vbW} ${totalH}" xmlns="http://www.w3.org/2000/svg" style="display:block;width:100%;height:auto">${s}</svg>`;
+}
 
 // ── Solar index tooltip content ────────────────────────────────────────────
 const SOLAR_TIPS = {
@@ -961,7 +1192,7 @@ function drawCities() {
     g.append('text')
       .attr('x', x+dx).attr('y', y+3.5)
       .attr('text-anchor', c.anchor)
-      .attr('font-size','7.5px').attr('font-family','Segoe UI,Arial,sans-serif')
+      .attr('font-size','10px').attr('font-family','Segoe UI,Arial,sans-serif')
       .attr('fill','rgba(0,0,0,0.85)').attr('stroke','rgba(0,0,0,0.85)')
       .attr('stroke-width','2.5px').attr('stroke-linejoin','round')
       .text(c.n);
@@ -970,7 +1201,7 @@ function drawCities() {
     g.append('text')
       .attr('x', x+dx).attr('y', y+3.5)
       .attr('text-anchor', c.anchor)
-      .attr('font-size','7.5px').attr('font-family','Segoe UI,Arial,sans-serif')
+      .attr('font-size','10px').attr('font-family','Segoe UI,Arial,sans-serif')
       .attr('fill','#cbd5e1')
       .text(c.n);
   });
@@ -1199,15 +1430,27 @@ function initSession() {
 }
 
 function applyCallsign(call) {
-  const badge = document.getElementById('callsign-badge');
+  const badge  = document.getElementById('callsign-badge');
+  const teaser = document.getElementById('login-teaser');
   if (call) {
     badge.textContent = call.toUpperCase();
     badge.classList.remove('badge-login');
+    if (teaser) teaser.style.display = 'none';
   } else {
-    badge.textContent = 'Open to login';
+    badge.textContent = 'Sign In / Register';
     badge.classList.add('badge-login');
+    if (teaser) teaser.style.display = '';
   }
   updateRefreshBtn();
+  updateControlsLock();
+}
+
+function updateControlsLock() {
+  const locked = !currentUser;
+  const body   = document.getElementById('panel-body');
+  if (body) body.classList.toggle('panel-locked', locked);
+  const mini = document.getElementById('header-teaser-mini');
+  if (mini) mini.style.display = locked ? 'block' : 'none';
 }
 
 function onBadgeClick() {
@@ -1226,11 +1469,13 @@ function togglePanel() {
   const btn       = document.getElementById('hamburger');
   const collapsed = body.classList.toggle('collapsed');
   btn.textContent = collapsed ? '☰' : '✕';
+}
 
-  // If opening the panel while not logged in, show the login dialog
-  if (!collapsed && !currentUser) {
-    showLoginModal();
-  }
+function toggleBandPlan() {
+  const container = document.getElementById('band-plan-container');
+  const btn       = document.getElementById('band-plan-toggle');
+  const collapsed = container.classList.toggle('bp-collapsed');
+  btn.textContent = collapsed ? '☰' : '✕';
 }
 
 // ── QTH section ───────────────────────────────────────────────────────────
@@ -1332,6 +1577,9 @@ function hideLoading() {
 function loadBand(band) {
   currentBand = band;
   document.getElementById('band-select').value = band;
+  const _nameEl = document.getElementById('band-display-name');
+  if (_nameEl) _nameEl.textContent = band.toUpperCase();
+  renderBandPlan(band);
 
   const antEnabled = document.getElementById('ant-enable').checked;
   const antType    = antEnabled ? document.getElementById('ant-type').value : 'vertical';
@@ -1428,11 +1676,25 @@ function updateSolar() {
       document.getElementById('val-ai' ).textContent = d['A-index']       ?? '—';
       document.getElementById('val-ssn').textContent = d['Sunspot Number']?? '—';
       renderBandConditions(d.band_conditions);
-      const ts  = d.last_update ? new Date(d.last_update*1000).toLocaleTimeString() : 'never';
       const src = d.source || '';
       const el  = document.getElementById('status');
-      el.textContent = (d.stale?'[STALE] ':'') + 'Updated '+ts+(src?' · '+src:'');
-      el.className   = d.stale ? 'stale' : '';
+      if (d.last_update) {
+        const dt  = new Date(d.last_update * 1000);
+        const p2  = n => String(n).padStart(2, '0');
+        const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        const utcStr   = `${p2(dt.getUTCDate())} ${MON[dt.getUTCMonth()]} ${dt.getUTCFullYear()} `
+                       + `${p2(dt.getUTCHours())}:${p2(dt.getUTCMinutes())} UTC`;
+        const localStr = dt.toLocaleString(undefined, {month:'short', day:'numeric',
+                           hour:'numeric', minute:'2-digit'}) + ' local';
+        document.getElementById('solar-ts-utc').textContent   = utcStr;
+        document.getElementById('solar-ts-local').textContent = localStr;
+        el.textContent = (d.stale ? '[STALE] ' : '') + 'Updated ' + p2(dt.getHours()) + ':' + p2(dt.getMinutes()) + (src ? ' · ' + src : '');
+      } else {
+        el.textContent = 'Solar data: no timestamp';
+        document.getElementById('solar-ts-utc').textContent   = '—';
+        document.getElementById('solar-ts-local').textContent = '—';
+      }
+      el.className = d.stale ? 'stale' : '';
     })
     .catch(() => {
       const el = document.getElementById('status');
@@ -1760,6 +2022,7 @@ function hidePrivacy(e)   {
 // ── Boot ──────────────────────────────────────────────────────────────────
 // Hide height selector initially (vertical is default, height not applicable)
 document.getElementById('ant-height-wrap').style.display = 'none';
+updateControlsLock();   // lock controls until auth check completes
 
 try {
   initMap();

@@ -6,7 +6,7 @@ This guide covers running the HF Propagation Map on your own machine for develop
 
 ## Prerequisites
 
-- Python 3.10 or later (3.12 recommended)
+- Python 3.14 recommended (3.12 minimum — 3.13 is being deprecated by AWS)
 - pip
 - An AWS account with DynamoDB access (the app reads and writes DynamoDB even when running locally)
 

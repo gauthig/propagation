@@ -2,7 +2,9 @@
 
 A real-time HF skywave propagation visualizer for amateur radio operators. Shows estimated band openness from your QTH to every point on the globe, driven by live solar indices and a physics-based ionospheric model.
 
-![Stack](https://img.shields.io/badge/Python-3.10%2B-blue) ![Flask](https://img.shields.io/badge/Flask-3.x-green) ![AWS Lambda](https://img.shields.io/badge/Deploy-AWS%20Lambda-orange) ![DynamoDB](https://img.shields.io/badge/DB-DynamoDB-yellow)
+![Stack](https://img.shields.io/badge/Python-3.14-blue) ![Flask](https://img.shields.io/badge/Flask-3.x-green) ![AWS Lambda](https://img.shields.io/badge/Deploy-AWS%20Lambda-orange) ![DynamoDB](https://img.shields.io/badge/DB-DynamoDB-yellow) ![License](https://img.shields.io/badge/License-GPL--3.0-blue)
+
+> **Working on this project?** This project is developed with [Claude Code](https://claude.ai/code). See [CLAUDE.md](CLAUDE.md) for setup instructions, including how to install the project memory files so Claude has full context on any machine.
 
 ---
 
@@ -31,6 +33,14 @@ propagation/
 ├── LOCAL_INSTALL.md    # Running the app on your own machine
 └── AWS_INSTALL.md      # Deploying to AWS Lambda with DynamoDB and CloudFront
 ```
+
+---
+
+## AWS Architecture
+
+![AWS Architecture Diagram](hf_propagation_aws_architecture.svg)
+
+*Browser → Cloudflare DNS → CloudFront (TLS via ACM) → Lambda Function URL → Flask app → DynamoDB. SES handles auth token emails. All resources tagged `app=hf_propagation` and collected in an AWS Resource Group.*
 
 ---
 
@@ -266,4 +276,4 @@ Implemented in `propagation.py` using the Python standard library only.
 
 ## License
 
-MIT
+[GPL-3.0](LICENSE) — you are free to use, modify, and distribute this software, but any derivative work must also be released under GPL-3.0.

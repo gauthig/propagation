@@ -6,7 +6,7 @@ resource "aws_lambda_function" "hf_propagation" {
   filename         = var.lambda_zip_path
   source_code_hash = filebase64sha256(var.lambda_zip_path)
 
-  runtime       = "python3.12"
+  runtime       = "python3.14"
   architectures = ["x86_64"]
   handler       = "app.handler"
   role          = aws_iam_role.lambda_exec.arn

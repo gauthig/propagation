@@ -250,7 +250,7 @@ The resulting `lambda.zip` should be approximately 3 MB.
 
 1. AWS Console → **Lambda** → **Create function**
 2. **Author from scratch**
-3. Runtime: **Python 3.12**, Architecture: **x86\_64**
+3. Runtime: **Python 3.14**, Architecture: **x86\_64**
 4. Click **Create function**
 
 ### Upload the zip
@@ -269,6 +269,8 @@ The resulting `lambda.zip` should be approximately 3 MB.
 |---|---|---|
 | Memory | 512 MB | Heatmap loop runs ~1,800 trig calls per request |
 | Timeout | 30 sec | Allows for slow solar data fetches from hamqsl.com |
+
+> **Python runtime note:** Use **Python 3.14** — it is the current AWS-recommended Lambda runtime. Python 3.13 is flagged for deprecation by AWS. If you need an older stable version for any reason, use **Python 3.12**.
 
 ### Add a Function URL
 
@@ -334,6 +336,40 @@ Point your subdomain to the CloudFront distribution domain name (shown in the Cl
 | `ERR_SSL_VERSION_OR_CIPHER_MISMATCH` | ACM cert doesn't cover the subdomain | Use a wildcard cert `*.yourdomain.com` |
 | 403 persists after setting the policy | Cloudflare proxy is still orange | Set DNS record to grey cloud (DNS only) |
 | ACM cert stuck in Pending validation | CNAME not added to DNS, or wrong record | Verify the exact CNAME name and value from the ACM console |
+
+---
+
+## Updating the Python runtime
+
+When a newer Python version becomes available on Lambda (e.g. 3.14), update in two steps:
+
+**Terraform:**
+
+1. Edit `terraform/lambda.tf` and change the `runtime` value:
+   ```hcl
+   runtime = "python3.14"
+   ```
+2. Apply:
+   ```bash
+   cd terraform && terraform apply
+   ```
+
+**Manual (Console):**
+
+1. Lambda console → your function → **Runtime settings** → **Edit**
+2. Select the new runtime from the dropdown → **Save**
+3. Test immediately — open the app and confirm the heatmap loads. `flask` and `requests` are compatible across all Python 3.x releases, but verify on a new major version.
+
+> The runtime change takes effect on the next cold start. Warm instances keep the old runtime for up to ~15 minutes.
+
+> To verify the current runtime or switch versions via CLI:
+> ```bash
+> aws lambda update-function-configuration \
+>   --function-name hf-propagation \
+>   --runtime python3.14 \
+>   --region us-east-1
+> ```
+> An `InvalidParameterValueException` means that version string is not yet available — fall back to `python3.12`. Alternatively, open the Lambda console → your function → **Runtime settings** → **Edit** and pick from the dropdown.
 
 ---
 
