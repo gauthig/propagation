@@ -962,9 +962,15 @@ function _postTrack(path, payload) {
   }).catch(() => {});
 }
 
-function trackVisit()               { _postTrack('/track/visit',    {}); }
+function trackVisit() {
+  const callsign = (localStorage.getItem(LS_CALL) || '').toUpperCase();
+  _postTrack('/track/visit', {callsign});
+}
 function trackCallsign(callsign)    { _postTrack('/track/callsign', {callsign}); }
-function trackQTH(lat, lon, method) { _postTrack('/track/qth',      {lat, lon, method}); }
+function trackQTH(lat, lon, method) {
+  const callsign = (localStorage.getItem(LS_CALL) || '').toUpperCase();
+  _postTrack('/track/qth', {callsign, lat, lon, method});
+}
 
 function updateRefreshBtn() {
   const callsign = (localStorage.getItem(LS_CALL) || '').toUpperCase();
@@ -1245,7 +1251,12 @@ function updateSolar() {
 function manualRefresh() {
   const btn = document.getElementById('refresh-btn');
   btn.disabled = true; btn.textContent = 'Refreshing…';
-  fetch('/solar/refresh', {method: 'POST'})
+  const callsign = (localStorage.getItem(LS_CALL) || '').toUpperCase();
+  fetch('/solar/refresh', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({callsign}),
+  })
     .then(r => r.json())
     .then(d => {
       if (d.SFI != null) currentSFI = parseFloat(d.SFI);

@@ -9,13 +9,13 @@ A real-time HF skywave propagation visualizer for amateur radio operators. Shows
 ## What It Does
 
 - Fetches live solar data (SFI, K-index, A-index, sunspot number) from hamqsl.com with a NOAA fallback
-- Caches solar data in DynamoDB — shared across all Lambda instances, auto-refreshed when over 2 hours old
+- Caches solar data in DynamoDB — shared across all Lambda instances, auto-refreshed when over 2 hours old; keeps a 100-row history of every refresh
 - Computes a global heatmap of propagation probability on the selected amateur band using a multi-hop F2 ionospheric model
 - Renders the heatmap over a Winkel Tripel world map using D3.js and an HTML5 Canvas
 - Supports three antenna models (vertical, dipole, hex beam) with height and orientation controls
 - Lets you set your QTH by Maidenhead grid square, lat/lon, or US ZIP code
-- Tracks visitors in DynamoDB by callsign, session, IP, QTH, and access count
-- Remembers your callsign and QTH across sessions via localStorage
+- Tracks visitors in DynamoDB by callsign (the stable cross-browser identity), IP, QTH, and access count
+- Remembers your callsign and QTH across sessions via browser localStorage
 
 ---
 
@@ -23,221 +23,31 @@ A real-time HF skywave propagation visualizer for amateur radio operators. Shows
 
 ```
 propagation/
-├── app.py              # Flask app — routes, DynamoDB helpers, Lambda WSGI handler
+├── app.py              # Flask app — routes, DynamoDB helpers, Lambda WSGI adapter
 ├── propagation.py      # Ionospheric model — foF2, MUF, antenna factors
 ├── templates/
 │   └── index.html      # Single-page UI — D3 map, panel, all JavaScript
-├── requirements.txt    # flask, requests (boto3 is pre-installed in Lambda runtime)
-└── README.md
+├── requirements.txt    # flask, requests  (boto3 is pre-installed in the Lambda runtime)
+├── LOCAL_INSTALL.md    # Running the app on your own machine
+└── AWS_INSTALL.md      # Deploying to AWS Lambda with DynamoDB and CloudFront
 ```
 
 ---
 
-## Local Installation
+## Installation
 
-### Prerequisites
-
-- Python 3.10 or later
-- pip
-- AWS credentials configured (`aws configure`) with DynamoDB access
-
-### Steps
-
-```bash
-# 1. Clone the repo
-git clone https://github.com/your-username/propagation.git
-cd propagation
-
-# 2. Create and activate a virtual environment
-python -m venv venv
-
-# Windows
-venv\Scripts\activate
-
-# macOS / Linux
-source venv/bin/activate
-
-# 3. Install dependencies (including boto3 for local DynamoDB access)
-pip install -r requirements.txt
-pip install boto3
-
-# 4. Run the development server
-python app.py
-```
-
-Open your browser to **http://127.0.0.1:5000**
-
-The background thread pre-warms the 20m and 40m heatmap cache every 15 minutes and writes solar data to DynamoDB. You will see a Flask development-server warning — expected and harmless for local use.
-
-### Local AWS credentials
-
-The app reads and writes DynamoDB on every request. Your local IAM user needs:
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [{
-    "Effect": "Allow",
-    "Action": ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem"],
-    "Resource": "*"
-  }]
-}
-```
-
----
-
-## AWS Setup
-
-### DynamoDB tables
-
-Create both tables in the AWS Console → DynamoDB → **Create table**:
-
-**Table 1 — Solar cache**
-
-| Setting | Value |
+| Environment | Guide |
 |---|---|
-| Table name | `hf_solar` |
-| Partition key | `record_id` (String) |
-
-**Table 2 — Visitor tracking**
-
-| Setting | Value |
-|---|---|
-| Table name | `hf_users` |
-| Partition key | `session_id` (String) |
-
-Use default settings for both. Wait for status **Active** before deploying.
-
-### Lambda execution role
-
-1. Lambda console → your function → **Configuration** → **Permissions** → click the role name
-2. **Add permissions** → **Attach policies** → **Create inline policy** → JSON tab:
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [{
-    "Effect": "Allow",
-    "Action": ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem"],
-    "Resource": "*"
-  }]
-}
-```
-
-3. Name it `hf-dynamodb-access` → **Create policy**
-
----
-
-## AWS Lambda Deployment
-
-A custom WSGI adapter in `app.py` translates Lambda Function URL payload v2.0 events directly into Flask WSGI calls — no third-party adapter library required.
-
-### Package the app
-
-**Windows (PowerShell):**
-
-```powershell
-$root = "C:\path\to\propagation"
-$pkg  = "$root\lambda_package"
-
-if (Test-Path $pkg) { Remove-Item $pkg -Recurse -Force }
-New-Item -ItemType Directory -Path $pkg | Out-Null
-
-pip install flask requests -t $pkg --quiet
-
-Copy-Item "$root\app.py"         "$pkg\app.py"
-Copy-Item "$root\propagation.py" "$pkg\propagation.py"
-Copy-Item "$root\templates"      "$pkg\templates" -Recurse
-
-$zip = "$root\lambda.zip"
-if (Test-Path $zip) { Remove-Item $zip -Force }
-Compress-Archive -Path "$pkg\*" -DestinationPath $zip
-
-Write-Host "Done — $([math]::Round((Get-Item $zip).Length/1MB, 1)) MB"
-```
-
-**macOS / Linux:**
-
-```bash
-cd /path/to/propagation
-rm -rf lambda_package && mkdir lambda_package
-pip install flask requests -t lambda_package --quiet
-cp app.py propagation.py lambda_package/
-cp -r templates lambda_package/
-cd lambda_package && zip -r ../lambda.zip . && cd ..
-```
-
-> boto3 is NOT included in the zip — it is pre-installed in every Lambda Python runtime.
-
-### Deploy in the AWS Console
-
-1. **Create function** — Author from scratch, Python 3.12, x86_64
-2. **Upload zip** — Code tab → Upload from → .zip file → select `lambda.zip` → Save
-3. **Set handler** — Runtime settings → Edit → Handler: `app.handler` → Save
-4. **Set timeout/memory** — Configuration → General configuration → Memory: `512 MB`, Timeout: `30 sec`
-5. **Add Function URL** — Configuration → Function URL → Create → Auth type: NONE → Enable CORS → Allow origin: `*`, Allow methods: `*`, Allow headers: `content-type` → Save
-
-Copy the generated Function URL — that is your public app address.
-
-### Lambda sizing
-
-| Setting | Value | Reason |
-|---|---|---|
-| Memory | 512 MB | Heatmap loop runs ~1,800 trig calls per request |
-| Timeout | 30 s | Allows for slow solar data fetches from hamqsl.com |
-| Runtime | Python 3.12 | Latest stable; no compiled extensions needed |
-
----
-
-## Custom Domain via CloudFront
-
-A bare CNAME pointing to a Lambda Function URL does not work — Lambda validates the `Host` header and rejects requests where it doesn't match the Function URL hostname. The solution is a CloudFront distribution in front of Lambda.
-
-### Step 1 — ACM certificate
-
-Request a **wildcard certificate** in ACM so any subdomain is covered without needing a new cert each time.
-
-> Must be created in **us-east-1** regardless of where your Lambda lives — CloudFront only reads ACM certs from that region.
-
-1. ACM → **Request certificate** → Public → domain: `*.yourdomain.com`
-2. Validation method: **DNS validation**
-3. Add the validation CNAME to your DNS provider and wait for status **Issued**
-
-### Step 2 — CloudFront distribution
-
-1. CloudFront → **Create distribution**
-2. **Origin domain:** your Lambda Function URL — bare hostname only, no `https://`
-3. **Origin type:** Other (Custom origin)
-4. **Protocol:** HTTPS only
-5. **Allowed HTTP methods:** GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE
-6. **Cache policy:** CachingDisabled
-7. **Origin request policy:** AllViewerExceptHostHeader ← required — without this Lambda rejects every request
-8. **Alternate domain names:** your custom domain (e.g. `propagation.yourdomain.com`)
-9. **Custom SSL certificate:** select the ACM wildcard cert
-10. Create — takes 5–10 min to deploy
-
-### Step 3 — DNS (Cloudflare)
-
-Add a CNAME in Cloudflare pointing your subdomain to the CloudFront distribution domain:
-
-| Type | Name | Target | Proxy |
-|---|---|---|---|
-| CNAME | `propagation` | `d1234abcd.cloudfront.net` | **Grey cloud (DNS only)** |
-
-> The Cloudflare proxy (orange cloud) must be **off**. Two proxy layers conflict with CloudFront SSL and produce a 403.
-
-### Common pitfalls
-
-| Symptom | Cause | Fix |
-|---|---|---|
-| `{"Message": null}` | Bare CNAME to Lambda URL | Add CloudFront in front |
-| 403 from CloudFront | Origin request policy not set | Set to AllViewerExceptHostHeader |
-| `ERR_SSL_VERSION_OR_CIPHER_MISMATCH` | No cert covering the subdomain | Use wildcard cert `*.yourdomain.com` |
-| 403 persists after policy fix | Cloudflare proxy is orange | Set DNS record to grey cloud (DNS only) |
+| Local / development | [LOCAL\_INSTALL.md](LOCAL_INSTALL.md) |
+| AWS Lambda + CloudFront | [AWS\_INSTALL.md](AWS_INSTALL.md) |
 
 ---
 
 ## How to Use
+
+### Callsign
+
+On first visit a prompt asks for your amateur radio callsign. Enter it and click **Save** — it is stored in browser localStorage and sent to the server to create or update your visitor record. Click **Skip** to continue anonymously (no visitor record is created). You can re-open the callsign dialog at any time by clicking the callsign badge in the panel header.
 
 ### Setting your QTH
 
@@ -249,7 +59,7 @@ Click **Set QTH** at the bottom of the panel. Three entry methods:
 | **Lat/Lon** | Decimal degrees | `39.8`, `-98.6` |
 | **ZIP** | US ZIP code | `90210` |
 
-Your callsign and QTH are stored in browser localStorage and restored on every return visit.
+Your callsign and QTH are saved in browser localStorage and restored automatically on every return visit — including when you return from a different browser or device after re-entering your callsign.
 
 ### Selecting a band
 
@@ -285,9 +95,13 @@ Check **Use antenna** to apply antenna pattern to the heatmap. Unchecked = basel
 | **Dipole** | Figure-8 pattern. Signal radiates broadside (90° to wire). |
 | **Hex Beam** | ~60° beamwidth, ~6 dBd gain, ~19 dB F/B. 20m–10m only. |
 
+### Solar indices panel
+
+Displays Solar Flux Index, K-index, A-index, and Sunspot Number pulled from DynamoDB. The data is refreshed automatically when the cached value is more than 2 hours old. Hover each card for a plain-English explanation.
+
 ### Refresh button
 
-The **Refresh Now** button is only visible when your callsign is **WB0Z**. It forces a fresh solar data fetch from hamqsl.com regardless of cache age, and updates DynamoDB so all users see the new data.
+The **Refresh Now** button is only shown when your callsign is **WB0Z**. It forces an immediate fetch from hamqsl.com regardless of cache age, writes a new row to the `hf_solar` history table (recording the callsign that triggered it), and updates the shared DynamoDB cache so all users see the new data.
 
 ---
 
@@ -295,7 +109,7 @@ The **Refresh Now** button is only visible when your callsign is **WB0Z**. It fo
 
 ### `GET /heatmap/<band>`
 
-Returns heatmap array for the specified band.
+Returns heatmap data for the specified band.
 
 **Query parameters:**
 
@@ -305,42 +119,59 @@ Returns heatmap array for the specified band.
 | `lon` | -98.6 | Station longitude |
 | `antenna` | `vertical` | `vertical`, `dipole`, or `hex_beam` |
 | `height_ft` | 30 | Antenna height in feet |
-| `azimuth` | 0 | Hex beam direction (degrees) |
+| `azimuth` | 0 | Hex beam pointing direction (degrees) |
 | `dipole_orient` | 0 | Dipole wire azimuth (0 = N–S, 90 = E–W) |
 
 **Response:** `[[lat, lon, strength], ...]` — strength is 0.0–1.0.
 
+---
+
 ### `GET /solar`
 
-Returns current solar indices. Reads from DynamoDB cache; fetches fresh if cache is over 2 hours old.
+Returns current solar indices. Reads from the DynamoDB `"current"` row; fetches fresh if over 2 hours old.
 
 ```json
 {
-  "SFI": 152.0, "K-index": 2.0, "A-index": 8.0, "Sunspot Number": 112.0,
-  "source": "hamqsl.com", "stale": false, "last_update": 1750000000.0,
+  "SFI": 152.0,
+  "K-index": 2.0,
+  "A-index": 8.0,
+  "Sunspot Number": 112.0,
+  "source": "hamqsl.com",
+  "last_update": 1750000000.0,
+  "refreshed_by": "auto",
   "band_conditions": { "80m-40m_day": "Good", "20m-17m_day": "Fair" }
 }
 ```
 
+---
+
 ### `POST /solar/refresh`
 
-Forces a fresh solar fetch regardless of cache age. Updates DynamoDB. Returns same shape as `/solar`.
+Forces a fresh solar fetch regardless of cache age. Updates DynamoDB. Returns the same shape as `/GET /solar`.
+
+Body: `{"callsign": "WB0Z"}` — stored in the history row as `refreshed_by`.
+
+---
 
 ### `GET /zip/<zipcode>`
 
-Geocodes a US ZIP code → `{zipcode, city, state, lat, lon}`.
+Geocodes a US ZIP code.
+
+Response: `{"zipcode": "90210", "city": "Beverly Hills", "state": "CA", "lat": 34.09, "lon": -118.41}`
+
+---
 
 ### `POST /track/visit`
 
-Body: `{"session_id": "<uuid>"}`. Increments `access_count`, updates `last_seen` and `ip_address`.
+Body: `{"callsign": "W1AW"}`. Upserts the visitor row, increments `access_count`, updates `last_seen` and `ip_address`. No-op if callsign is empty (anonymous visitors are not tracked).
 
 ### `POST /track/callsign`
 
-Body: `{"session_id": "<uuid>", "callsign": "W1AW"}`. Stores callsign on session row.
+Body: `{"callsign": "W1AW", "session_id": "<uuid>"}`. Creates or updates the callsign row; stores the current browser `session_id` as a reference attribute.
 
 ### `POST /track/qth`
 
-Body: `{"session_id": "<uuid>", "lat": 39.8, "lon": -98.6, "method": "grid"}`. Stores QTH on session row.
+Body: `{"callsign": "W1AW", "lat": 39.8, "lon": -98.6, "method": "grid"}`. Updates QTH fields on the callsign row.
 
 ---
 
@@ -348,24 +179,35 @@ Body: `{"session_id": "<uuid>", "lat": 39.8, "lon": -98.6, "method": "grid"}`. S
 
 ### `hf_solar`
 
+Two kinds of rows coexist in this table:
+
+**Fast-lookup row** — always present, updated on every refresh:
+
 | Attribute | Type | Description |
 |---|---|---|
-| `record_id` | String (PK) | Always `"current"` — single-row cache |
+| `record_id` | String (PK) | Always `"current"` |
 | `SFI` | Number | Solar flux index |
 | `K-index` | Number | Geomagnetic K-index |
 | `A-index` | Number | Geomagnetic A-index |
 | `Sunspot Number` | Number | Daily sunspot count |
 | `source` | String | `"hamqsl.com"` or `"NOAA"` |
-| `band_conditions` | Map | Per-band day/night condition strings |
+| `band_conditions` | Map | Per-band condition strings |
 | `timestamp` | String | ISO 8601 UTC write time |
 | `timestamp_epoch` | Number | Unix epoch — used for TTL comparison |
+| `refreshed_by` | String | Callsign or `"auto"` |
+
+**History rows** — one new row per refresh, oldest deleted when count exceeds 100:
+
+Same attributes as above, but `record_id` is a UTC timestamp string (e.g. `2026-06-22T14:30:00.123456Z`).
+
+---
 
 ### `hf_users`
 
 | Attribute | Type | Description |
 |---|---|---|
-| `session_id` | String (PK) | UUID from browser localStorage |
-| `callsign` | String | Amateur radio callsign (if entered) |
+| `callsign` | String (PK) | Amateur callsign — stable cross-browser identity |
+| `session_id` | String | Most recent browser localStorage UUID |
 | `ip_address` | String | Last seen IP address |
 | `first_seen` | String | ISO 8601 UTC — set once, never overwritten |
 | `last_seen` | String | ISO 8601 UTC — updated on every visit |
@@ -384,7 +226,7 @@ Implemented in `propagation.py` using the Python standard library only.
 
 **MUF** — `foF2 × M-factor` (3.2 single-hop / 3.7 two-hop / 4.1 three-hop). Limited by the weakest hop along the path.
 
-**Strength curve** — probabilistic rather than hard cutoff:
+**Strength curve** — probabilistic rather than a hard cutoff:
 - `< 0.45×MUF` → 0 (D-layer absorption)
 - `0.45–0.85×MUF` → rising from 0 (below FOT, noisy)
 - `0.85–1.0×MUF` → 1.0 (optimal range)
@@ -399,14 +241,14 @@ Implemented in `propagation.py` using the Python standard library only.
 
 ## Dependencies
 
-**Backend** (in `requirements.txt`):
+**Backend** (`requirements.txt`):
 
 | Package | Purpose |
 |---|---|
 | `flask` | Web framework and template rendering |
 | `requests` | HTTP client for solar data fetches |
 
-**Lambda runtime** (pre-installed, not in zip):
+**Lambda runtime** (pre-installed — do not add to zip):
 
 | Package | Purpose |
 |---|---|

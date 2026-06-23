@@ -954,28 +954,22 @@ function getSessionId() {
   return sid;
 }
 
+function _postTrack(path, payload) {
+  fetch(path, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({session_id: getSessionId(), ...payload}),
+  }).catch(() => {});
+}
+
 function trackVisit() {
-  fetch('/track/visit', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({session_id: getSessionId()}),
-  }).catch(() => {});
+  const callsign = (localStorage.getItem(LS_CALL) || '').toUpperCase();
+  _postTrack('/track/visit', {callsign});
 }
-
-function trackCallsign(callsign) {
-  fetch('/track/callsign', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({session_id: getSessionId(), callsign}),
-  }).catch(() => {});
-}
-
+function trackCallsign(callsign)    { _postTrack('/track/callsign', {callsign}); }
 function trackQTH(lat, lon, method) {
-  fetch('/track/qth', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({session_id: getSessionId(), lat, lon, method}),
-  }).catch(() => {});
+  const callsign = (localStorage.getItem(LS_CALL) || '').toUpperCase();
+  _postTrack('/track/qth', {callsign, lat, lon, method});
 }
 
 function updateRefreshBtn() {
@@ -1257,7 +1251,12 @@ function updateSolar() {
 function manualRefresh() {
   const btn = document.getElementById('refresh-btn');
   btn.disabled = true; btn.textContent = 'Refreshing…';
-  fetch('/solar/refresh', {method: 'POST'})
+  const callsign = (localStorage.getItem(LS_CALL) || '').toUpperCase();
+  fetch('/solar/refresh', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({callsign}),
+  })
     .then(r => r.json())
     .then(d => {
       if (d.SFI != null) currentSFI = parseFloat(d.SFI);
