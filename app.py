@@ -1,10 +1,14 @@
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, make_response
 import requests
 import threading
 import time
 import base64
 import sys
 import datetime
+import hashlib
+import secrets
+import hmac
+import os
 from decimal import Decimal
 from io import BytesIO
 from propagation import calculate_muf_map, get_solar_indices
@@ -28,6 +32,110 @@ BAND_FREQS = {
     '15m': (21.000, 21.450),
     '10m': (28.000, 29.700),
 }
+
+# ── Auth configuration ─────────────────────────────────────────────────────────
+AUTH_COOKIE       = 'hf_auth'
+AUTH_COOKIE_DAYS  = 30
+HASH_ITERATIONS   = 260_000
+SES_SENDER_EMAIL  = os.environ.get('SES_SENDER_EMAIL', '')
+SES_REGION        = os.environ.get('AWS_REGION', 'us-east-1')
+
+
+def _hash_password(password):
+    salt = secrets.token_bytes(32)
+    key  = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, HASH_ITERATIONS)
+    return salt.hex() + ':' + key.hex()
+
+
+def _verify_password(password, stored_hash):
+    try:
+        salt_hex, key_hex = stored_hash.split(':', 1)
+        key = hashlib.pbkdf2_hmac('sha256', password.encode(), bytes.fromhex(salt_hex), HASH_ITERATIONS)
+        return hmac.compare_digest(key.hex(), key_hex)
+    except Exception:
+        return False
+
+
+def _encode_auth_cookie(callsign, token):
+    return base64.b64encode(f'{callsign}:{token}'.encode()).decode()
+
+
+def _decode_auth_cookie(val):
+    try:
+        decoded = base64.b64decode(val).decode()
+        cs, tok = decoded.split(':', 1)
+        return cs.upper(), tok
+    except Exception:
+        return None, None
+
+
+def _get_current_user():
+    val = request.cookies.get(AUTH_COOKIE, '')
+    if not val:
+        return None
+    callsign, token = _decode_auth_cookie(val)
+    if not callsign:
+        return None
+    try:
+        resp = _users_table.get_item(Key={'callsign': callsign})
+        user = resp.get('Item')
+        if not user:
+            return None
+        if not hmac.compare_digest(user.get('auth_token', ''), token):
+            return None
+        exp = user.get('auth_expires', '')
+        if exp:
+            exp_dt = datetime.datetime.fromisoformat(exp)
+            if exp_dt.tzinfo is None:
+                exp_dt = exp_dt.replace(tzinfo=datetime.timezone.utc)
+            if exp_dt < datetime.datetime.now(datetime.timezone.utc):
+                return None
+        if user.get('active') is False:
+            return None
+        return _from_dynamo(user)
+    except Exception as e:
+        print(f'[auth] get_current_user error: {e}')
+        return None
+
+
+def _set_auth_cookie(response, callsign, token):
+    val = _encode_auth_cookie(callsign, token)
+    response.set_cookie(
+        AUTH_COOKIE, val,
+        max_age=AUTH_COOKIE_DAYS * 86400,
+        httponly=True,
+        samesite='Lax',
+        secure=True,
+    )
+    return response
+
+
+def _send_reset_email(email, callsign, token):
+    print(f'[auth] reset token for {callsign}: {token}')  # always log for debugging
+    if not SES_SENDER_EMAIL:
+        print('[auth] SES_SENDER_EMAIL not configured — token logged above only')
+        return
+    try:
+        ses = boto3.client('ses', region_name=SES_REGION)
+        body = (
+            f'Hello {callsign},\n\n'
+            f'Your HF Propagation password reset token is: {token}\n\n'
+            f'This token expires in 1 hour. If you did not request this, ignore this email.\n\n'
+            f'73 de HF Propagation'
+        )
+        ses.send_email(
+            Source=SES_SENDER_EMAIL,
+            Destination={'ToAddresses': [email]},
+            Message={
+                'Subject': {'Data': 'HF Propagation Password Reset'},
+                'Body': {'Text': {'Data': body}},
+            },
+        )
+        print(f'[auth] reset email sent to {email[:3]}***')
+    except Exception as e:
+        print(f'[auth] SES send_email error: {e}')
+        raise
+
 
 # ── DynamoDB ───────────────────────────────────────────────────────────────────
 _dynamo      = boto3.resource('dynamodb')
@@ -260,6 +368,250 @@ def track_qth():
     if callsign and lat is not None and lon is not None:
         _track_qth(callsign, float(lat), float(lon), data.get('method', ''))
     return jsonify({'ok': True})
+
+
+# ── Auth ──────────────────────────────────────────────────────────────────────
+
+@app.route('/auth/me')
+def auth_me():
+    user = _get_current_user()
+    if not user:
+        return jsonify({'logged_in': False})
+    return jsonify({
+        'logged_in': True,
+        'callsign':  user['callsign'],
+        'admin':     bool(user.get('admin', False)),
+    })
+
+
+@app.route('/auth/login', methods=['POST'])
+def auth_login():
+    data     = request.get_json(silent=True) or {}
+    callsign = data.get('callsign', '').upper().strip()
+    password = data.get('password', '')
+    if not callsign or not password:
+        return jsonify({'error': 'missing_fields'}), 400
+    try:
+        item = _users_table.get_item(Key={'callsign': callsign}).get('Item')
+        if not item:
+            return jsonify({'error': 'callsign_not_found'}), 401
+        if not _verify_password(password, item.get('password_hash', '')):
+            return jsonify({'error': 'incorrect_password'}), 401
+        if item.get('active') is False:
+            return jsonify({'error': 'account_deactivated'}), 403
+        now    = datetime.datetime.now(datetime.timezone.utc)
+        token  = secrets.token_urlsafe(32)
+        exp    = (now + datetime.timedelta(days=AUTH_COOKIE_DAYS)).isoformat()
+        _users_table.update_item(
+            Key={'callsign': callsign},
+            UpdateExpression='SET auth_token = :t, auth_expires = :e, last_login = :ts ADD login_count :one',
+            ExpressionAttributeValues={':t': token, ':e': exp, ':ts': now.isoformat(), ':one': 1},
+        )
+        resp = make_response(jsonify({
+            'ok': True, 'callsign': callsign, 'admin': bool(item.get('admin', False)),
+        }))
+        return _set_auth_cookie(resp, callsign, token)
+    except Exception as e:
+        print(f'[auth] login error: {e}')
+        return jsonify({'error': 'server_error'}), 500
+
+
+@app.route('/auth/register', methods=['POST'])
+def auth_register():
+    data     = request.get_json(silent=True) or {}
+    callsign = data.get('callsign', '').upper().strip()
+    password = data.get('password', '')
+    email    = data.get('email', '').lower().strip()
+    if not callsign or not password or not email:
+        return jsonify({'error': 'missing_fields'}), 400
+    if len(password) < 8:
+        return jsonify({'error': 'password_too_short'}), 400
+    try:
+        item = _users_table.get_item(Key={'callsign': callsign}).get('Item')
+        if item and item.get('password_hash'):
+            return jsonify({'error': 'callsign_exists'}), 409
+        now    = datetime.datetime.now(datetime.timezone.utc)
+        token  = secrets.token_urlsafe(32)
+        exp    = (now + datetime.timedelta(days=AUTH_COOKIE_DAYS)).isoformat()
+        pw_hash = _hash_password(password)
+        _users_table.update_item(
+            Key={'callsign': callsign},
+            UpdateExpression=(
+                'SET password_hash = :ph, email = :em, auth_token = :t, auth_expires = :e, '
+                'active = :act, first_seen = if_not_exists(first_seen, :ts), last_seen = :ts, '
+                'last_login = :ts ADD login_count :one'
+            ),
+            ExpressionAttributeValues={
+                ':ph': pw_hash, ':em': email, ':t': token, ':e': exp,
+                ':act': True, ':ts': now.isoformat(), ':one': 1,
+            },
+        )
+        resp = make_response(jsonify({'ok': True, 'callsign': callsign, 'admin': False}))
+        return _set_auth_cookie(resp, callsign, token)
+    except Exception as e:
+        print(f'[auth] register error: {e}')
+        return jsonify({'error': 'server_error'}), 500
+
+
+@app.route('/auth/logout', methods=['POST'])
+def auth_logout():
+    user = _get_current_user()
+    if user:
+        try:
+            _users_table.update_item(
+                Key={'callsign': user['callsign']},
+                UpdateExpression='REMOVE auth_token, auth_expires',
+            )
+        except Exception:
+            pass
+    resp = make_response(jsonify({'ok': True}))
+    resp.delete_cookie(AUTH_COOKIE)
+    return resp
+
+
+@app.route('/auth/reset/request', methods=['POST'])
+def auth_reset_request():
+    data     = request.get_json(silent=True) or {}
+    callsign = data.get('callsign', '').upper().strip()
+    email_in = data.get('email', '').lower().strip()
+    if not callsign:
+        return jsonify({'error': 'missing_fields'}), 400
+    try:
+        item = _users_table.get_item(Key={'callsign': callsign}).get('Item')
+        if not item:
+            return jsonify({'error': 'callsign_not_found'}), 404
+        stored_email = item.get('email', '').lower()
+        if not stored_email:
+            return jsonify({'error': 'no_email'}), 404
+        if email_in and not hmac.compare_digest(email_in, stored_email):
+            return jsonify({'error': 'email_mismatch'}), 400
+        reset_token = secrets.token_hex(3).upper()  # 6-char hex, easy to type
+        exp = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)).isoformat()
+        _users_table.update_item(
+            Key={'callsign': callsign},
+            UpdateExpression='SET reset_token = :t, reset_token_expires = :e',
+            ExpressionAttributeValues={':t': reset_token, ':e': exp},
+        )
+        _send_reset_email(stored_email, callsign, reset_token)
+        masked = stored_email[:2] + '***@' + stored_email.split('@')[-1] if '@' in stored_email else stored_email[:3] + '***'
+        return jsonify({'ok': True, 'email_masked': masked})
+    except Exception as e:
+        print(f'[auth] reset_request error: {e}')
+        return jsonify({'error': 'server_error'}), 500
+
+
+@app.route('/auth/reset/confirm', methods=['POST'])
+def auth_reset_confirm():
+    data     = request.get_json(silent=True) or {}
+    callsign = data.get('callsign', '').upper().strip()
+    token    = data.get('token', '').upper().strip()
+    new_pw   = data.get('new_password', '')
+    if not all([callsign, token, new_pw]):
+        return jsonify({'error': 'missing_fields'}), 400
+    if len(new_pw) < 8:
+        return jsonify({'error': 'password_too_short'}), 400
+    try:
+        item = _users_table.get_item(Key={'callsign': callsign}).get('Item')
+        if not item:
+            return jsonify({'error': 'callsign_not_found'}), 404
+        stored = item.get('reset_token', '')
+        if not stored or not hmac.compare_digest(stored, token):
+            return jsonify({'error': 'invalid_token'}), 400
+        exp = item.get('reset_token_expires', '')
+        if exp:
+            exp_dt = datetime.datetime.fromisoformat(exp)
+            if exp_dt.tzinfo is None:
+                exp_dt = exp_dt.replace(tzinfo=datetime.timezone.utc)
+            if exp_dt < datetime.datetime.now(datetime.timezone.utc):
+                return jsonify({'error': 'token_expired'}), 400
+        pw_hash  = _hash_password(new_pw)
+        new_tok  = secrets.token_urlsafe(32)
+        new_exp  = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=AUTH_COOKIE_DAYS)).isoformat()
+        _users_table.update_item(
+            Key={'callsign': callsign},
+            UpdateExpression='SET password_hash = :ph, auth_token = :at, auth_expires = :ae REMOVE reset_token, reset_token_expires',
+            ExpressionAttributeValues={':ph': pw_hash, ':at': new_tok, ':ae': new_exp},
+        )
+        resp = make_response(jsonify({'ok': True, 'callsign': callsign, 'admin': bool(item.get('admin', False))}))
+        return _set_auth_cookie(resp, callsign, new_tok)
+    except Exception as e:
+        print(f'[auth] reset_confirm error: {e}')
+        return jsonify({'error': 'server_error'}), 500
+
+
+# ── Admin ──────────────────────────────────────────────────────────────────────
+
+@app.route('/admin/users')
+def admin_list_users():
+    user = _get_current_user()
+    if not user or not user.get('admin'):
+        return jsonify({'error': 'Unauthorized'}), 403
+    try:
+        resp = _users_table.scan(
+            ProjectionExpression='callsign, first_seen, last_login, login_count, active, #adm, email',
+            ExpressionAttributeNames={'#adm': 'admin'},
+        )
+        users = sorted(
+            [_from_dynamo(u) for u in resp.get('Items', [])],
+            key=lambda u: u.get('last_login') or u.get('first_seen') or '',
+            reverse=True,
+        )
+        return jsonify(users)
+    except Exception as e:
+        print(f'[admin] list_users error: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/admin/users/deactivate', methods=['POST'])
+def admin_deactivate_user():
+    user = _get_current_user()
+    if not user or not user.get('admin'):
+        return jsonify({'error': 'Unauthorized'}), 403
+    data   = request.get_json(silent=True) or {}
+    target = data.get('callsign', '').upper().strip()
+    active = data.get('active', False)
+    if not target:
+        return jsonify({'error': 'Callsign required'}), 400
+    try:
+        if active:
+            _users_table.update_item(
+                Key={'callsign': target},
+                UpdateExpression='SET active = :act',
+                ExpressionAttributeValues={':act': True},
+            )
+        else:
+            _users_table.update_item(
+                Key={'callsign': target},
+                UpdateExpression='SET active = :act REMOVE auth_token, auth_expires',
+                ExpressionAttributeValues={':act': False},
+            )
+        return jsonify({'ok': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/admin/users/reset-password', methods=['POST'])
+def admin_reset_user_password():
+    user = _get_current_user()
+    if not user or not user.get('admin'):
+        return jsonify({'error': 'Unauthorized'}), 403
+    data   = request.get_json(silent=True) or {}
+    target = data.get('callsign', '').upper().strip()
+    new_pw = data.get('password', '')
+    if not target or not new_pw:
+        return jsonify({'error': 'Callsign and password required'}), 400
+    if len(new_pw) < 8:
+        return jsonify({'error': 'password_too_short'}), 400
+    try:
+        pw_hash = _hash_password(new_pw)
+        _users_table.update_item(
+            Key={'callsign': target},
+            UpdateExpression='SET password_hash = :ph, active = :act REMOVE auth_token, auth_expires',
+            ExpressionAttributeValues={':ph': pw_hash, ':act': True},
+        )
+        return jsonify({'ok': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 # ── Solar ──────────────────────────────────────────────────────────────────────
