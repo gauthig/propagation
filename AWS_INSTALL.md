@@ -16,6 +16,130 @@ Browser → CloudFront (optional) → Lambda Function URL → Flask app → Dyna
 
 ---
 
+## Deployment options
+
+| Option | When to use |
+|---|---|
+| **Terraform** (recommended) | New deployment, or taking existing resources under IaC |
+| **Manual (AWS Console)** | Quick one-off change or if Terraform is not available |
+
+---
+
+## Option A — Terraform (automated)
+
+The `terraform/` directory in this repo contains a complete Terraform configuration that creates and manages all AWS resources.
+
+### Prerequisites
+
+- [Terraform CLI](https://developer.hashicorp.com/terraform/install) ≥ 1.5
+- AWS credentials configured (`aws configure` or environment variables `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`)
+
+### First-time setup
+
+**1. Build the Lambda zip** (skip if `lambda.zip` already exists — see [Package the app](#package-the-app)):
+
+```powershell
+# Windows (PowerShell) — run from the repo root
+$pkg = "lambda_package"
+if (Test-Path $pkg) { Remove-Item $pkg -Recurse -Force }
+New-Item -ItemType Directory -Path $pkg | Out-Null
+pip install flask requests -t $pkg --quiet
+Copy-Item app.py, propagation.py $pkg
+Copy-Item templates $pkg\templates -Recurse
+Compress-Archive -Path "$pkg\*" -DestinationPath lambda.zip -Force
+```
+
+**2. Create your variable file:**
+
+```powershell
+cd terraform
+Copy-Item terraform.tfvars.example terraform.tfvars
+```
+
+Open `terraform.tfvars` and fill in your values:
+
+```hcl
+aws_region           = "us-east-1"
+domain_name          = "ggcloud.us"
+subdomain            = "propagation"
+ses_sender_email     = "noreply@ggcloud.us"   # must be verified in SES
+lambda_function_name = "hf-propagation"
+lambda_zip_path      = "../lambda.zip"
+```
+
+**3. Initialize and apply:**
+
+```bash
+terraform init
+terraform plan    # review what will be created
+terraform apply
+```
+
+Terraform will output:
+- **`lambda_function_url`** — direct Lambda URL (use for smoke-testing)
+- **`cloudfront_domain`** — add this as a CNAME in your DNS
+- **`acm_certificate_validation_options`** — CNAME records needed to validate the ACM cert
+- **`ses_dkim_tokens`** — DKIM CNAME records to add to your DNS
+
+> **ACM validation:** after `terraform apply`, the ACM wildcard cert will be in *Pending validation* until you add the CNAME record shown in `acm_certificate_validation_options` to your DNS provider. CloudFront will not finish deploying until the cert is issued.
+
+> **Cloudflare DNS:** set the CNAME pointing to `cloudfront_domain` to **DNS only (grey cloud)**. The orange proxy conflicts with CloudFront SSL and causes 403 errors.
+
+---
+
+### Importing existing resources into Terraform state
+
+If the resources already exist in AWS, import them instead of recreating them:
+
+**1. Edit `terraform/import.sh`** and fill in your account details at the top:
+
+```bash
+AWS_ACCOUNT_ID="123456789012"        # your 12-digit AWS account ID
+                                     # find it: AWS Console → top-right account menu
+LAMBDA_FUNCTION_NAME="hf-propagation"
+CF_DISTRIBUTION_ID="EXXXXXXXXXXXX"  # CloudFront console → Distribution ID column
+ACM_CERT_ARN="arn:aws:acm:us-east-1:123456789012:certificate/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                                     # ACM console (us-east-1) → certificate ARN
+```
+
+**2. Run the import script:**
+
+```bash
+cd terraform
+terraform init
+bash import.sh
+```
+
+**3. Verify no unintended changes:**
+
+```bash
+terraform plan
+```
+
+The plan should show zero changes (or only minor tag/description drift). Fix any drift before running `apply`.
+
+---
+
+### Updating the app with Terraform
+
+After any code change, rebuild the zip and let Terraform detect the new hash:
+
+```bash
+# from repo root
+Compress-Archive -Path "lambda_package\*" -DestinationPath lambda.zip -Force
+cd terraform && terraform apply
+```
+
+Terraform detects the changed `source_code_hash` and deploys only the Lambda update — no CloudFront invalidation needed.
+
+---
+
+## Option B — Manual (AWS Console)
+
+The sections below walk through each resource in the AWS Console. Use these if you prefer not to use Terraform or need to make a targeted change.
+
+---
+
 ## DynamoDB tables
 
 Create both tables in the AWS Console → **DynamoDB** → **Create table**. Use default settings (on-demand billing, no sort key) unless noted.
@@ -215,7 +339,14 @@ Point your subdomain to the CloudFront distribution domain name (shown in the Cl
 
 ## Updating the app
 
-After any code change, rebuild the zip and re-upload:
+**Terraform:** rebuild the zip, then apply:
+
+```bash
+Compress-Archive -Path "lambda_package\*" -DestinationPath lambda.zip -Force
+cd terraform && terraform apply
+```
+
+**Manual:** rebuild the zip, then re-upload:
 
 1. Run the packaging script above
 2. Lambda console → **Code** tab → **Upload from** → **.zip file** → select `lambda.zip` → **Save**

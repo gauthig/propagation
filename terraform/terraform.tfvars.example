@@ -1,0 +1,9 @@
+# Copy this to terraform.tfvars and fill in your values.
+# terraform.tfvars is gitignored — never commit real values.
+
+aws_region           = "us-east-1"
+domain_name          = "ggcloud.us"
+subdomain            = "propagation"
+ses_sender_email     = "noreply@ggcloud.us"
+lambda_function_name = "hf-propagation"
+lambda_zip_path      = "../lambda.zip"
