@@ -183,7 +183,7 @@
     /* ── Callsign display in header ─────────────────────────── */
     #callsign-badge {
       font-size:0.68rem; color:#38bdf8; letter-spacing:0.06em;
-      font-weight:600; margin-top:2px; display:none; cursor:pointer;
+      font-weight:600; margin-top:2px; display:block; cursor:pointer;
     }
     #callsign-badge:hover { text-decoration:underline; }
     #help-btn {
@@ -258,6 +258,65 @@
       font-size:0.7rem; color:#475569; border-top:1px solid rgba(255,255,255,0.06);
       padding-top:12px; margin-top:6px; line-height:1.55;
     }
+
+    /* ── Auth / login modal extras ──────────────────────── */
+    .modal-error {
+      min-height:1.1em; font-size:0.74rem; color:#f87171;
+      margin-top:7px; line-height:1.4;
+    }
+    .modal-input-pw { text-transform:none !important; letter-spacing:0.04em !important; }
+    .modal-link-btn {
+      background:none; border:none; color:#38bdf8; font-size:0.74rem;
+      cursor:pointer; text-decoration:underline; font-family:inherit; padding:0;
+    }
+    .modal-link-btn:hover { color:#7dd3fc; }
+    .modal-note {
+      font-size:0.67rem; color:#475569; line-height:1.5; margin-top:10px;
+      border-top:1px solid rgba(255,255,255,0.07); padding-top:9px;
+    }
+    .modal-input + .modal-input { margin-top:8px; }
+    .modal-sub { font-size:0.75rem; color:#94a3b8; margin:0 0 14px; line-height:1.5; }
+
+    /* ── Callsign badge — login state ───────────────────── */
+    #callsign-badge.badge-login {
+      color:#64748b; font-weight:400; letter-spacing:0.02em; cursor:pointer;
+    }
+    #callsign-badge.badge-login:hover { color:#94a3b8; text-decoration:underline; }
+
+    /* ── Admin panel ────────────────────────────────────── */
+    #admin-tab-btn {
+      position:fixed; top:50%; right:0; transform:translateY(-50%);
+      z-index:1001; background:rgba(10,14,22,0.92); backdrop-filter:blur(8px);
+      border:1px solid rgba(239,68,68,0.35); border-right:none;
+      border-radius:8px 0 0 8px; color:#f87171; font-size:0.58rem; font-weight:700;
+      letter-spacing:0.12em; padding:18px 7px; cursor:pointer;
+      writing-mode:vertical-rl; transform:translateY(-50%) rotate(180deg);
+      font-family:inherit; display:none;
+    }
+    #admin-tab-btn:hover { background:rgba(239,68,68,0.10); }
+
+    /* ── Privacy link ───────────────────────────────────── */
+    #privacy-link {
+      position:fixed; bottom:10px; right:14px; z-index:1000;
+      background:none; border:none; color:#334155; font-size:0.63rem;
+      cursor:pointer; font-family:inherit; text-decoration:underline;
+      transition:color 0.15s;
+    }
+    #privacy-link:hover { color:#475569; }
+
+    /* ── Admin user table ───────────────────────────────── */
+    .admin-table { width:100%; border-collapse:collapse; font-size:0.74rem; }
+    .admin-table th {
+      text-align:left; padding:6px 8px; color:#475569; font-size:0.62rem;
+      text-transform:uppercase; letter-spacing:0.05em;
+      border-bottom:1px solid rgba(255,255,255,0.08);
+    }
+    .admin-table td { padding:6px 8px; vertical-align:middle; border-bottom:1px solid rgba(255,255,255,0.04); }
+    .admin-table tr:hover td { background:rgba(255,255,255,0.02); }
+    .admin-action {
+      padding:2px 9px; border-radius:4px; font-size:0.66rem; cursor:pointer;
+      font-family:inherit; font-weight:600; transition:all 0.15s; margin-left:4px;
+    }
   </style>
 </head>
 <body>
@@ -272,7 +331,7 @@
   <div id="panel-header">
     <div>
       <h1>HF Propagation</h1>
-      <div id="callsign-badge" onclick="showCallsignEdit()" title="Click to edit callsign"></div>
+      <div id="callsign-badge" onclick="onBadgeClick()" title="Click to sign in / edit callsign">Open to login</div>
     </div>
     <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
       <button id="help-btn" onclick="showHelp()" title="Help / About">?</button>
@@ -280,7 +339,7 @@
     </div>
   </div>
 
-  <div id="panel-body">
+  <div id="panel-body" class="collapsed">
 
     <!-- Band selector -->
     <div class="field-row">
@@ -288,8 +347,8 @@
       <select id="band-select" onchange="loadBand(this.value)">
         <option value="80m">80m  (3.5 – 4.0 MHz)</option>
         <option value="60m">60m  (5.3 – 5.4 MHz)</option>
-        <option value="40m">40m  (7.0 – 7.3 MHz)</option>
-        <option value="20m" selected>20m (14.0 – 14.35 MHz)</option>
+        <option value="40m" selected>40m  (7.0 – 7.3 MHz)</option>
+        <option value="20m">20m (14.0 – 14.35 MHz)</option>
         <option value="17m">17m (18.07 – 18.17 MHz)</option>
         <option value="15m">15m (21.0 – 21.45 MHz)</option>
         <option value="10m">10m (28.0 – 29.7 MHz)</option>
@@ -437,20 +496,6 @@
   <div id="loading-msg">Loading propagation data…</div>
 </div>
 
-<!-- ── Callsign popup ────────────────────────────────────────── -->
-<div id="callsign-modal" class="modal-overlay hidden">
-  <div class="modal-card">
-    <h2>Welcome to HF Propagation</h2>
-    <p>Enter your amateur radio callsign to personalize your session. Your callsign and QTH will be remembered in this browser.</p>
-    <input class="modal-input" id="callsign-input" type="text" placeholder="e.g. W1AW"
-           maxlength="12" autocomplete="off" spellcheck="false"
-           onkeydown="if(event.key==='Enter') saveCallsign()">
-    <div class="modal-btn-row">
-      <button class="modal-btn modal-btn-primary" onclick="saveCallsign()">Continue</button>
-      <button class="modal-btn modal-btn-secondary" onclick="skipCallsign()">Skip</button>
-    </div>
-  </div>
-</div>
 
 <!-- ── Help / About modal ────────────────────────────────────── -->
 <div id="help-modal" class="modal-overlay hidden" onclick="hideHelp(event)">
@@ -517,6 +562,169 @@
     </div>
   </div>
 </div>
+
+<!-- ── Login / auth modal ───────────────────────────────── -->
+<div id="login-modal" class="modal-overlay hidden">
+  <div class="modal-card" style="width:min(380px,92vw)">
+    <button class="modal-close" onclick="closeLoginModal()">✕</button>
+
+    <!-- View: sign in -->
+    <div id="lv-login">
+      <h2>Sign In</h2>
+      <p class="modal-sub">Enter your callsign and password to personalize your session.</p>
+      <input class="modal-input" id="li-callsign" type="text" placeholder="Callsign"
+             maxlength="12" autocomplete="username" spellcheck="false"
+             onkeydown="if(event.key==='Enter') document.getElementById('li-password').focus()">
+      <input class="modal-input modal-input-pw" id="li-password" type="password" placeholder="Password"
+             autocomplete="current-password"
+             onkeydown="if(event.key==='Enter') submitLogin()" style="margin-top:8px">
+      <div id="li-error" class="modal-error"></div>
+      <div class="modal-btn-row">
+        <button class="modal-btn modal-btn-primary" onclick="submitLogin()">Login</button>
+        <button class="modal-btn modal-btn-secondary" onclick="showLoginView('register')">New User</button>
+      </div>
+      <div id="li-reset-wrap" style="display:none;margin-top:10px;text-align:center">
+        <button class="modal-link-btn" onclick="showLoginView('reset-email')">Reset Password</button>
+      </div>
+      <div class="modal-note">This service is free. We only use your callsign and login to save your settings and track overall app usage, not individual users.</div>
+    </div>
+
+    <!-- View: new user registration -->
+    <div id="lv-register" style="display:none">
+      <h2>New Account</h2>
+      <input class="modal-input" id="reg-callsign" type="text" placeholder="Callsign"
+             maxlength="12" autocomplete="username" spellcheck="false">
+      <input class="modal-input modal-input-pw" id="reg-password" type="password" placeholder="Password (min 8 chars)"
+             autocomplete="new-password" style="margin-top:8px">
+      <input class="modal-input modal-input-pw" id="reg-confirm" type="password" placeholder="Confirm password"
+             autocomplete="new-password" style="margin-top:8px"
+             onkeydown="if(event.key==='Enter') submitRegister()">
+      <input class="modal-input" id="reg-email" type="email" placeholder="Email address"
+             autocomplete="email" style="margin-top:8px;text-transform:none;letter-spacing:0">
+      <div class="modal-note">Email is used only for notifications or password resets. It will never be sold or shared with third parties.</div>
+      <div id="reg-error" class="modal-error"></div>
+      <div class="modal-btn-row">
+        <button class="modal-btn modal-btn-primary" onclick="submitRegister()">Register</button>
+        <button class="modal-btn modal-btn-secondary" onclick="showLoginView('login')">Back</button>
+      </div>
+    </div>
+
+    <!-- View: request reset — enter email -->
+    <div id="lv-reset-email" style="display:none">
+      <h2>Reset Password</h2>
+      <p class="modal-sub">A one-time token will be sent to your email.</p>
+      <input class="modal-input" id="rst-callsign" type="text" placeholder="Callsign"
+             maxlength="12" autocomplete="username" spellcheck="false">
+      <input class="modal-input" id="rst-email" type="email" placeholder="Email address"
+             autocomplete="email" style="margin-top:8px;text-transform:none;letter-spacing:0"
+             onkeydown="if(event.key==='Enter') submitResetRequest()">
+      <div id="rst-email-error" class="modal-error"></div>
+      <div class="modal-btn-row">
+        <button class="modal-btn modal-btn-primary" onclick="submitResetRequest()">Send Token</button>
+        <button class="modal-btn modal-btn-secondary" onclick="showLoginView('login')">Back</button>
+      </div>
+    </div>
+
+    <!-- View: enter reset token -->
+    <div id="lv-reset-token" style="display:none">
+      <h2>Enter Token</h2>
+      <p class="modal-sub" id="rst-token-desc">Check your email for the 6-character token.</p>
+      <input class="modal-input" id="rst-token" type="text" placeholder="6-character token"
+             maxlength="6" autocomplete="one-time-code" spellcheck="false"
+             onkeydown="if(event.key==='Enter') submitResetToken()">
+      <div id="rst-token-error" class="modal-error"></div>
+      <div class="modal-btn-row">
+        <button class="modal-btn modal-btn-primary" onclick="submitResetToken()">Verify</button>
+        <button class="modal-btn modal-btn-secondary" onclick="showLoginView('reset-email')">Back</button>
+      </div>
+    </div>
+
+    <!-- View: set new password -->
+    <div id="lv-reset-newpw" style="display:none">
+      <h2>New Password</h2>
+      <input class="modal-input modal-input-pw" id="rst-newpw" type="password" placeholder="New password (min 8 chars)"
+             autocomplete="new-password">
+      <input class="modal-input modal-input-pw" id="rst-newpw2" type="password" placeholder="Confirm new password"
+             autocomplete="new-password" style="margin-top:8px"
+             onkeydown="if(event.key==='Enter') submitNewPassword()">
+      <div id="rst-newpw-error" class="modal-error"></div>
+      <div class="modal-btn-row">
+        <button class="modal-btn modal-btn-primary" onclick="submitNewPassword()">Set Password</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Admin tab button (right edge) ────────────────────── -->
+<button id="admin-tab-btn" onclick="openAdminPanel()" title="Admin panel">ADMIN</button>
+
+<!-- ── Admin panel overlay ──────────────────────────────── -->
+<div id="admin-modal" class="modal-overlay hidden" onclick="closeAdminPanel(event)">
+  <div class="modal-card" onclick="event.stopPropagation()"
+       style="width:min(760px,96vw);max-height:85vh;overflow-y:auto">
+    <button class="modal-close" onclick="closeAdminPanel()">✕</button>
+    <h2>User Administration</h2>
+    <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center">
+      <button class="modal-btn modal-btn-secondary" style="flex:none;width:auto;padding:5px 16px"
+              onclick="loadAdminUsers()">↻ Refresh</button>
+      <span id="admin-user-count" style="font-size:0.72rem;color:#475569"></span>
+    </div>
+    <div id="admin-user-list" style="color:#475569;font-size:0.75rem">Loading…</div>
+  </div>
+</div>
+
+<!-- ── Admin inline reset-password modal ────────────────── -->
+<div id="admin-reset-modal" class="modal-overlay hidden" onclick="closeAdminReset(event)">
+  <div class="modal-card" onclick="event.stopPropagation()" style="width:min(340px,90vw)">
+    <button class="modal-close" onclick="closeAdminReset()">✕</button>
+    <h2>Reset Password</h2>
+    <p id="admin-reset-for" class="modal-sub"></p>
+    <input class="modal-input modal-input-pw" id="admin-reset-pw" type="password"
+           placeholder="New password (min 8 chars)" autocomplete="new-password"
+           onkeydown="if(event.key==='Enter') submitAdminResetPw()">
+    <div id="admin-reset-error" class="modal-error"></div>
+    <div class="modal-btn-row">
+      <button class="modal-btn modal-btn-primary" onclick="submitAdminResetPw()">Set Password</button>
+      <button class="modal-btn modal-btn-secondary" onclick="closeAdminReset()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Privacy policy modal ─────────────────────────────── -->
+<div id="privacy-modal" class="modal-overlay hidden" onclick="hidePrivacy(event)">
+  <div class="modal-card" onclick="event.stopPropagation()"
+       style="width:min(520px,94vw);max-height:85vh;overflow-y:auto">
+    <button class="modal-close" onclick="hidePrivacy()">✕</button>
+    <h2>Privacy Policy</h2>
+    <div class="help-section">
+      <h3>Data Collection</h3>
+      <p>HF Propagation collects only what is necessary to provide the service: your amateur radio callsign, a salted password hash (never the plaintext password), and optionally your email address for password resets.</p>
+    </div>
+    <div class="help-section">
+      <h3>Data Use</h3>
+      <p>All collected data stays within this application. It is used solely to:</p>
+      <ul>
+        <li>Save your personal settings (QTH location, band preferences)</li>
+        <li>Track aggregate application usage statistics (not linked to individual users)</li>
+        <li>Send password reset notifications when you request them</li>
+      </ul>
+    </div>
+    <div class="help-section">
+      <h3>Data Sharing</h3>
+      <p><b style="color:#e2e8f0">No data will be sold, transferred, or provided to any third party under any circumstances.</b> Your callsign and any personal information you provide remains within this program only.</p>
+    </div>
+    <div class="help-section">
+      <h3>Email</h3>
+      <p>If you provide an email address it is stored securely and used only for password reset notifications. It will never be used for marketing or shared with any third party.</p>
+    </div>
+    <div style="margin-top:16px;text-align:center">
+      <button class="modal-btn modal-btn-primary" style="width:120px" onclick="hidePrivacy()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Privacy policy link ───────────────────────────────── -->
+<button id="privacy-link" onclick="showPrivacy()">Privacy Policy</button>
 
 <script>
 // ── Constants ─────────────────────────────────────────────────────────────
@@ -639,7 +847,7 @@ const CITIES = [
 
 // ── App state ─────────────────────────────────────────────────────────────
 let qthLat = DEFAULT_LAT, qthLon = DEFAULT_LON;
-let currentBand = '20m';
+let currentBand = '40m';
 let currentSFI  = 100;
 let heatData    = [];
 let worldTopo   = null;
@@ -962,31 +1170,19 @@ function _postTrack(path, payload) {
   }).catch(() => {});
 }
 
-function trackVisit() {
-  const callsign = (localStorage.getItem(LS_CALL) || '').toUpperCase();
-  _postTrack('/track/visit', {callsign});
+function _activeCallsign() {
+  return currentUser ? currentUser.callsign : (localStorage.getItem(LS_CALL) || '').toUpperCase();
 }
+function trackVisit()               { _postTrack('/track/visit',    {callsign: _activeCallsign()}); }
 function trackCallsign(callsign)    { _postTrack('/track/callsign', {callsign}); }
-function trackQTH(lat, lon, method) {
-  const callsign = (localStorage.getItem(LS_CALL) || '').toUpperCase();
-  _postTrack('/track/qth', {callsign, lat, lon, method});
-}
+function trackQTH(lat, lon, method) { _postTrack('/track/qth', {callsign: _activeCallsign(), lat, lon, method}); }
 
 function updateRefreshBtn() {
-  const callsign = (localStorage.getItem(LS_CALL) || '').toUpperCase();
+  const callsign = currentUser ? currentUser.callsign : (localStorage.getItem(LS_CALL) || '').toUpperCase();
   document.getElementById('refresh-btn').style.display = callsign === 'WB0Z' ? '' : 'none';
 }
 
 function initSession() {
-  const stored = localStorage.getItem(LS_CALL);
-  if (stored === null) {
-    // First visit — show popup after a short delay so the map loads first
-    setTimeout(() => document.getElementById('callsign-modal').classList.remove('hidden'), 800);
-  } else {
-    applyCallsign(stored);
-    if (stored) trackCallsign(stored);  // re-link this session to the callsign on every return visit
-  }
-
   // Restore saved QTH if available
   const lat   = parseFloat(localStorage.getItem(LS_LAT));
   const lon   = parseFloat(localStorage.getItem(LS_LON));
@@ -999,45 +1195,42 @@ function initSession() {
     geoPath    = d3.geoPath(projection);
     if (worldTopo) { drawBaseMap(); drawCities(); }
   }
+  // Auth state is handled by initAuth() — no callsign popup on first visit
 }
 
 function applyCallsign(call) {
   const badge = document.getElementById('callsign-badge');
   if (call) {
     badge.textContent = call.toUpperCase();
-    badge.style.display = 'block';
+    badge.classList.remove('badge-login');
   } else {
-    badge.style.display = 'none';
+    badge.textContent = 'Open to login';
+    badge.classList.add('badge-login');
   }
   updateRefreshBtn();
 }
 
-function saveCallsign() {
-  const raw  = document.getElementById('callsign-input').value.trim().toUpperCase();
-  localStorage.setItem(LS_CALL, raw);
-  applyCallsign(raw);
-  document.getElementById('callsign-modal').classList.add('hidden');
-  if (raw) trackCallsign(raw);
+function onBadgeClick() {
+  if (currentUser) {
+    // Logged-in user: show logout option or just open panel
+    if (confirm(`Signed in as ${currentUser.callsign}. Sign out?`)) submitLogout();
+  } else {
+    showLoginModal();
+  }
 }
 
-function skipCallsign() {
-  localStorage.setItem(LS_CALL, '');   // empty string = "skip, don't ask again"
-  document.getElementById('callsign-modal').classList.add('hidden');
-}
-
-function showCallsignEdit() {
-  const current = localStorage.getItem(LS_CALL) || '';
-  document.getElementById('callsign-input').value = current;
-  document.getElementById('callsign-modal').classList.remove('hidden');
-  setTimeout(() => document.getElementById('callsign-input').select(), 50);
-}
 
 // ── Panel hamburger ───────────────────────────────────────────────────────
 function togglePanel() {
-  const body = document.getElementById('panel-body');
-  const btn  = document.getElementById('hamburger');
-  const open = body.classList.toggle('collapsed');
-  btn.textContent = open ? '☰' : '✕';
+  const body      = document.getElementById('panel-body');
+  const btn       = document.getElementById('hamburger');
+  const collapsed = body.classList.toggle('collapsed');
+  btn.textContent = collapsed ? '☰' : '✕';
+
+  // If opening the panel while not logged in, show the login dialog
+  if (!collapsed && !currentUser) {
+    showLoginModal();
+  }
 }
 
 // ── QTH section ───────────────────────────────────────────────────────────
@@ -1251,7 +1444,7 @@ function updateSolar() {
 function manualRefresh() {
   const btn = document.getElementById('refresh-btn');
   btn.disabled = true; btn.textContent = 'Refreshing…';
-  const callsign = (localStorage.getItem(LS_CALL) || '').toUpperCase();
+  const callsign = _activeCallsign();
   fetch('/solar/refresh', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
@@ -1275,6 +1468,295 @@ function manualRefresh() {
     .finally(() => { btn.disabled=false; btn.textContent='Refresh Now'; });
 }
 
+// ── Auth state ────────────────────────────────────────────────────────────
+let currentUser = null;   // { callsign, admin } when logged in, null otherwise
+let _resetCallsign = ''; // temp callsign held across reset steps
+
+async function initAuth() {
+  try {
+    const r = await fetch('/auth/me');
+    const d = await r.json();
+    if (d.logged_in) {
+      currentUser = { callsign: d.callsign, admin: d.admin };
+      applyCallsign(d.callsign);
+    } else {
+      currentUser = null;
+      applyCallsign('');
+    }
+  } catch(e) {
+    currentUser = null;
+    applyCallsign('');
+  }
+  updateAdminPanel();
+}
+
+function handleLoginSuccess(data) {
+  currentUser = { callsign: data.callsign, admin: data.admin };
+  applyCallsign(data.callsign);
+  updateAdminPanel();
+  closeLoginModal();
+  // Sync tracking
+  trackCallsign(data.callsign);
+}
+
+// ── Login modal ───────────────────────────────────────────────────────────
+function showLoginModal(preCallsign) {
+  showLoginView('login');
+  if (preCallsign) document.getElementById('li-callsign').value = preCallsign;
+  document.getElementById('login-modal').classList.remove('hidden');
+  setTimeout(() => document.getElementById('li-callsign').focus(), 80);
+}
+
+function closeLoginModal() {
+  document.getElementById('login-modal').classList.add('hidden');
+}
+
+function showLoginView(view) {
+  ['login','register','reset-email','reset-token','reset-newpw'].forEach(v => {
+    document.getElementById('lv-' + v).style.display = v === view ? '' : 'none';
+  });
+  // Clear errors
+  ['li-error','reg-error','rst-email-error','rst-token-error','rst-newpw-error'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = '';
+  });
+  document.getElementById('li-reset-wrap').style.display = 'none';
+}
+
+function _setErr(id, msg) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = msg;
+}
+
+async function submitLogin() {
+  const callsign = document.getElementById('li-callsign').value.trim().toUpperCase();
+  const password = document.getElementById('li-password').value;
+  _setErr('li-error', '');
+  if (!callsign || !password) { _setErr('li-error', 'Enter your callsign and password.'); return; }
+  try {
+    const r = await fetch('/auth/login', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ callsign, password }),
+    });
+    const d = await r.json();
+    if (r.ok && d.ok) { handleLoginSuccess(d); return; }
+    if (d.error === 'callsign_not_found') {
+      _setErr('li-error', 'Callsign not found.');
+    } else if (d.error === 'incorrect_password') {
+      _setErr('li-error', 'Incorrect password.');
+      document.getElementById('li-reset-wrap').style.display = '';
+    } else if (d.error === 'account_deactivated') {
+      _setErr('li-error', 'This account has been deactivated.');
+    } else {
+      _setErr('li-error', 'Login failed. Please try again.');
+    }
+  } catch(e) { _setErr('li-error', 'Network error — please try again.'); }
+}
+
+async function submitRegister() {
+  const callsign = document.getElementById('reg-callsign').value.trim().toUpperCase();
+  const password = document.getElementById('reg-password').value;
+  const confirm  = document.getElementById('reg-confirm').value;
+  const email    = document.getElementById('reg-email').value.trim().toLowerCase();
+  _setErr('reg-error', '');
+  if (!callsign || !password || !confirm || !email) { _setErr('reg-error', 'All fields are required.'); return; }
+  if (password.length < 8) { _setErr('reg-error', 'Password must be at least 8 characters.'); return; }
+  if (password !== confirm) { _setErr('reg-error', 'Passwords do not match.'); return; }
+  if (!email.includes('@')) { _setErr('reg-error', 'Enter a valid email address.'); return; }
+  try {
+    const r = await fetch('/auth/register', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ callsign, password, email }),
+    });
+    const d = await r.json();
+    if (r.ok && d.ok) { handleLoginSuccess(d); return; }
+    if (d.error === 'callsign_exists') {
+      _setErr('reg-error', 'This callsign already has an account. Sign in instead.');
+    } else if (d.error === 'password_too_short') {
+      _setErr('reg-error', 'Password must be at least 8 characters.');
+    } else {
+      _setErr('reg-error', 'Registration failed. Please try again.');
+    }
+  } catch(e) { _setErr('reg-error', 'Network error — please try again.'); }
+}
+
+async function submitResetRequest() {
+  const callsign = document.getElementById('rst-callsign').value.trim().toUpperCase();
+  const email    = document.getElementById('rst-email').value.trim().toLowerCase();
+  _setErr('rst-email-error', '');
+  if (!callsign || !email) { _setErr('rst-email-error', 'Enter your callsign and email address.'); return; }
+  try {
+    const r = await fetch('/auth/reset/request', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ callsign, email }),
+    });
+    const d = await r.json();
+    if (r.ok && d.ok) {
+      _resetCallsign = callsign;
+      document.getElementById('rst-token-desc').textContent =
+        `Token sent to ${d.email_masked}. Check your email and enter the 6-character token below.`;
+      showLoginView('reset-token');
+      setTimeout(() => document.getElementById('rst-token').focus(), 80);
+      return;
+    }
+    if (d.error === 'callsign_not_found') _setErr('rst-email-error', 'Callsign not found.');
+    else if (d.error === 'no_email') _setErr('rst-email-error', 'No email address found for this callsign.');
+    else if (d.error === 'email_mismatch') _setErr('rst-email-error', 'Email address does not match our records.');
+    else _setErr('rst-email-error', 'Request failed. Please try again.');
+  } catch(e) { _setErr('rst-email-error', 'Network error — please try again.'); }
+}
+
+async function submitResetToken() {
+  const token = document.getElementById('rst-token').value.trim().toUpperCase();
+  _setErr('rst-token-error', '');
+  if (!token) { _setErr('rst-token-error', 'Enter the token from your email.'); return; }
+  // Lightweight client-side check: confirm token looks right, then let server validate
+  // Store token in a temp var and move to new-password view
+  document.getElementById('rst-token').dataset.value = token;
+  showLoginView('reset-newpw');
+  setTimeout(() => document.getElementById('rst-newpw').focus(), 80);
+}
+
+async function submitNewPassword() {
+  const newpw  = document.getElementById('rst-newpw').value;
+  const newpw2 = document.getElementById('rst-newpw2').value;
+  const token  = document.getElementById('rst-token').dataset.value || '';
+  _setErr('rst-newpw-error', '');
+  if (!newpw || !newpw2) { _setErr('rst-newpw-error', 'Enter and confirm your new password.'); return; }
+  if (newpw.length < 8)  { _setErr('rst-newpw-error', 'Password must be at least 8 characters.'); return; }
+  if (newpw !== newpw2)  { _setErr('rst-newpw-error', 'Passwords do not match.'); return; }
+  try {
+    const r = await fetch('/auth/reset/confirm', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ callsign: _resetCallsign, token, new_password: newpw }),
+    });
+    const d = await r.json();
+    if (r.ok && d.ok) { handleLoginSuccess(d); return; }
+    if (d.error === 'invalid_token')   _setErr('rst-newpw-error', 'Invalid token. Go back and try again.');
+    else if (d.error === 'token_expired') _setErr('rst-newpw-error', 'Token has expired. Request a new one.');
+    else if (d.error === 'password_too_short') _setErr('rst-newpw-error', 'Password must be at least 8 characters.');
+    else _setErr('rst-newpw-error', 'Password reset failed. Please try again.');
+  } catch(e) { _setErr('rst-newpw-error', 'Network error — please try again.'); }
+}
+
+async function submitLogout() {
+  try { await fetch('/auth/logout', { method: 'POST' }); } catch(e) {}
+  currentUser = null;
+  applyCallsign('');
+  updateAdminPanel();
+}
+
+// ── Admin panel ───────────────────────────────────────────────────────────
+function updateAdminPanel() {
+  document.getElementById('admin-tab-btn').style.display =
+    (currentUser && currentUser.admin) ? 'block' : 'none';
+}
+
+function openAdminPanel() {
+  document.getElementById('admin-modal').classList.remove('hidden');
+  loadAdminUsers();
+}
+
+function closeAdminPanel(e) {
+  if (e && e.target !== document.getElementById('admin-modal')) return;
+  document.getElementById('admin-modal').classList.add('hidden');
+}
+
+async function loadAdminUsers() {
+  const el = document.getElementById('admin-user-list');
+  el.innerHTML = '<div style="color:#475569">Loading…</div>';
+  document.getElementById('admin-user-count').textContent = '';
+  try {
+    const r = await fetch('/admin/users');
+    if (!r.ok) {
+      let msg = `HTTP ${r.status}`;
+      try { const d = await r.json(); msg += ': ' + (d.error || JSON.stringify(d)); } catch(_) {}
+      el.innerHTML = `<div style="color:#f87171">${msg}</div>`;
+      return;
+    }
+    const users = await r.json();
+    document.getElementById('admin-user-count').textContent = `${users.length} users`;
+    if (!users.length) { el.innerHTML = '<div style="color:#475569">No users.</div>'; return; }
+    const rows = users.map(u => {
+      const active     = u.active !== false;
+      const lastLogin  = u.last_login  ? new Date(u.last_login).toLocaleDateString()  : '—';
+      const firstSeen  = u.first_seen  ? new Date(u.first_seen).toLocaleDateString()  : '—';
+      const logins     = u.login_count || 0;
+      const statusColor = active ? '#4ade80' : '#f87171';
+      const toggleLbl   = active ? 'Deactivate' : 'Activate';
+      return `<tr>
+        <td style="font-weight:600;color:#38bdf8">${u.callsign}</td>
+        <td style="color:${statusColor}">${active ? 'Active' : 'Inactive'}</td>
+        <td>${lastLogin}</td>
+        <td>${logins}</td>
+        <td>${firstSeen}</td>
+        <td>
+          <button class="admin-action modal-btn-secondary"
+                  style="border:1px solid #334155;background:transparent;color:#64748b"
+                  onclick="adminToggleActive('${u.callsign}',${active})">${toggleLbl}</button>
+          <button class="admin-action modal-btn-primary"
+                  style="border:1px solid #334155;background:transparent;color:#64748b"
+                  onclick="adminResetPw('${u.callsign}')">Reset PW</button>
+        </td>
+      </tr>`;
+    }).join('');
+    el.innerHTML = `<table class="admin-table">
+      <thead><tr>
+        <th>Callsign</th><th>Status</th><th>Last Login</th>
+        <th>Logins</th><th>First Seen</th><th>Actions</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  } catch(e) { el.innerHTML = '<div style="color:#f87171">Error loading users.</div>'; }
+}
+
+async function adminToggleActive(callsign, currentlyActive) {
+  try {
+    const r = await fetch('/admin/users/deactivate', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ callsign, active: !currentlyActive }),
+    });
+    if (r.ok) loadAdminUsers();
+  } catch(e) {}
+}
+
+let _adminResetTarget = '';
+function adminResetPw(callsign) {
+  _adminResetTarget = callsign;
+  document.getElementById('admin-reset-for').textContent = `Set new password for ${callsign}`;
+  document.getElementById('admin-reset-pw').value = '';
+  _setErr('admin-reset-error', '');
+  document.getElementById('admin-reset-modal').classList.remove('hidden');
+  setTimeout(() => document.getElementById('admin-reset-pw').focus(), 80);
+}
+
+function closeAdminReset(e) {
+  if (e && e.target !== document.getElementById('admin-reset-modal')) return;
+  document.getElementById('admin-reset-modal').classList.add('hidden');
+}
+
+async function submitAdminResetPw() {
+  const pw = document.getElementById('admin-reset-pw').value;
+  _setErr('admin-reset-error', '');
+  if (!pw || pw.length < 8) { _setErr('admin-reset-error', 'Password must be at least 8 characters.'); return; }
+  try {
+    const r = await fetch('/admin/users/reset-password', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ callsign: _adminResetTarget, password: pw }),
+    });
+    const d = await r.json();
+    if (r.ok && d.ok) { closeAdminReset(); return; }
+    _setErr('admin-reset-error', d.error || 'Failed.');
+  } catch(e) { _setErr('admin-reset-error', 'Network error.'); }
+}
+
+// ── Privacy policy ────────────────────────────────────────────────────────
+function showPrivacy()    { document.getElementById('privacy-modal').classList.remove('hidden'); }
+function hidePrivacy(e)   {
+  if (e && e.target !== document.getElementById('privacy-modal')) return;
+  document.getElementById('privacy-modal').classList.add('hidden');
+}
+
 // ── Boot ──────────────────────────────────────────────────────────────────
 // Hide height selector initially (vertical is default, height not applicable)
 document.getElementById('ant-height-wrap').style.display = 'none';
@@ -1286,10 +1768,11 @@ try {
   document.getElementById('loading-msg').textContent =
     'Map init failed: ' + e.message + ' — check browser console';
 }
-initSession();   // restore callsign + QTH from localStorage, show popup if first visit
+initSession();   // restore QTH from localStorage
+initAuth();      // check auth cookie → set currentUser, update badge + admin panel
 trackVisit();    // log visit to DynamoDB
 updateSolar();
-loadBand('20m');
+loadBand('40m');
 setInterval(function() { updateSolar(); loadBand(currentBand); }, 900000);
 </script>
 </body>

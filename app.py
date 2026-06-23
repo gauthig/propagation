@@ -57,13 +57,16 @@ def _verify_password(password, stored_hash):
 
 
 def _encode_auth_cookie(callsign, token):
-    return base64.b64encode(f'{callsign}:{token}'.encode()).decode()
+    # Callsigns are alphanumeric; token_urlsafe uses [A-Za-z0-9_-].
+    # Use '.' as separator — no base64 wrapper avoids padding/encoding issues in cookies.
+    return f'{callsign.upper()}.{token}'
 
 
 def _decode_auth_cookie(val):
     try:
-        decoded = base64.b64decode(val).decode()
-        cs, tok = decoded.split(':', 1)
+        cs, tok = val.split('.', 1)
+        if not cs or not tok:
+            return None, None
         return cs.upper(), tok
     except Exception:
         return None, None
@@ -72,16 +75,21 @@ def _decode_auth_cookie(val):
 def _get_current_user():
     val = request.cookies.get(AUTH_COOKIE, '')
     if not val:
+        print('[auth] no cookie')
         return None
     callsign, token = _decode_auth_cookie(val)
     if not callsign:
+        print(f'[auth] cookie decode failed, raw={val[:30]}')
         return None
     try:
         resp = _users_table.get_item(Key={'callsign': callsign})
         user = resp.get('Item')
         if not user:
+            print(f'[auth] callsign {callsign} not in DB')
             return None
-        if not hmac.compare_digest(user.get('auth_token', ''), token):
+        stored_token = user.get('auth_token', '')
+        if not hmac.compare_digest(stored_token, token):
+            print(f'[auth] token mismatch for {callsign}')
             return None
         exp = user.get('auth_expires', '')
         if exp:
@@ -89,8 +97,10 @@ def _get_current_user():
             if exp_dt.tzinfo is None:
                 exp_dt = exp_dt.replace(tzinfo=datetime.timezone.utc)
             if exp_dt < datetime.datetime.now(datetime.timezone.utc):
+                print(f'[auth] token expired for {callsign}')
                 return None
         if user.get('active') is False:
+            print(f'[auth] account inactive: {callsign}')
             return None
         return _from_dynamo(user)
     except Exception as e:
@@ -100,12 +110,13 @@ def _get_current_user():
 
 def _set_auth_cookie(response, callsign, token):
     val = _encode_auth_cookie(callsign, token)
+    # secure=True only in production (HTTPS); False in local Flask dev (HTTP)
     response.set_cookie(
         AUTH_COOKIE, val,
         max_age=AUTH_COOKIE_DAYS * 86400,
         httponly=True,
         samesite='Lax',
-        secure=True,
+        secure=not app.debug,
     )
     return response
 
@@ -546,13 +557,12 @@ def admin_list_users():
     user = _get_current_user()
     if not user or not user.get('admin'):
         return jsonify({'error': 'Unauthorized'}), 403
+    _SENSITIVE = {'password_hash', 'auth_token', 'auth_expires', 'reset_token', 'reset_expires'}
     try:
-        resp = _users_table.scan(
-            ProjectionExpression='callsign, first_seen, last_login, login_count, active, #adm, email',
-            ExpressionAttributeNames={'#adm': 'admin'},
-        )
+        resp = _users_table.scan()
+        items = resp.get('Items', [])
         users = sorted(
-            [_from_dynamo(u) for u in resp.get('Items', [])],
+            [{k: v for k, v in _from_dynamo(u).items() if k not in _SENSITIVE} for u in items],
             key=lambda u: u.get('last_login') or u.get('first_seen') or '',
             reverse=True,
         )

@@ -1649,7 +1649,7 @@ async function submitLogout() {
 // ── Admin panel ───────────────────────────────────────────────────────────
 function updateAdminPanel() {
   document.getElementById('admin-tab-btn').style.display =
-    (currentUser && currentUser.admin) ? '' : 'none';
+    (currentUser && currentUser.admin) ? 'block' : 'none';
 }
 
 function openAdminPanel() {
@@ -1668,7 +1668,12 @@ async function loadAdminUsers() {
   document.getElementById('admin-user-count').textContent = '';
   try {
     const r = await fetch('/admin/users');
-    if (!r.ok) { el.innerHTML = '<div style="color:#f87171">Unauthorized or error.</div>'; return; }
+    if (!r.ok) {
+      let msg = `HTTP ${r.status}`;
+      try { const d = await r.json(); msg += ': ' + (d.error || JSON.stringify(d)); } catch(_) {}
+      el.innerHTML = `<div style="color:#f87171">${msg}</div>`;
+      return;
+    }
     const users = await r.json();
     document.getElementById('admin-user-count').textContent = `${users.length} users`;
     if (!users.length) { el.innerHTML = '<div style="color:#475569">No users.</div>'; return; }
