@@ -19,13 +19,13 @@ resource "aws_acm_certificate" "wildcard" {
   tags = var.tags
 }
 
-# ── CloudFront managed policy lookups ─────────────────────────────────────────
-data "aws_cloudfront_cache_policy" "caching_disabled" {
-  name = "CachingDisabled"
-}
-
-data "aws_cloudfront_origin_request_policy" "all_viewer_except_host_header" {
-  name = "AllViewerExceptHostHeader"
+# ── CloudFront managed policies ───────────────────────────────────────────────
+# AWS-managed policy IDs are global constants (identical in every account).
+# Hardcoded instead of data-source lookups so plan/apply doesn't require the
+# cloudfront:ListCachePolicies / ListOriginRequestPolicies IAM permissions.
+locals {
+  cache_policy_caching_disabled            = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad" # CachingDisabled
+  origin_policy_all_viewer_except_host_hdr = "b689b0a8-53d0-40ab-baf2-68738e2966ac" # AllViewerExceptHostHeader
 }
 
 # ── CloudFront distribution ───────────────────────────────────────────────────
@@ -56,10 +56,10 @@ resource "aws_cloudfront_distribution" "hf_propagation" {
     allowed_methods = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
     cached_methods  = ["GET", "HEAD"]
 
-    cache_policy_id = data.aws_cloudfront_cache_policy.caching_disabled.id
+    cache_policy_id = local.cache_policy_caching_disabled
     # AllViewerExceptHostHeader is required — without it Lambda rejects requests
     # because the Host header contains the CloudFront domain instead of the Function URL
-    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer_except_host_header.id
+    origin_request_policy_id = local.origin_policy_all_viewer_except_host_hdr
 
     compress = true
   }

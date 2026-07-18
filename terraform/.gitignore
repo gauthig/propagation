@@ -12,3 +12,6 @@ terraform.tfvars
 *.tfplan
 
 # .terraform.lock.hcl is intentionally committed (pins provider versions like package-lock.json)
+
+# Local import script with real account values — never committed
+import.local.sh

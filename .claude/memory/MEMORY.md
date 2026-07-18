@@ -6,3 +6,4 @@
 - [API routes & external services](api_routes.md) — Flask routes (including antenna params), solar data sources, ZIP geocoding
 - [UI features](ui_features.md) — panel layout, antenna section, callsign popup, help modal, overlays
 - [Lambda packaging rule](feedback_lambda_packaging.md) — always rebuild lambda.zip after editing app.py, propagation.py, or templates/
+- [Version scheme](project_versioning.md) — APP_VERSION format YYMM.###; ### bumps each build and resets to 001 at each new month

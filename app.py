@@ -26,6 +26,10 @@ logging.basicConfig(level=os.environ.get('HF_LOG_LEVEL', 'WARNING').upper())
 log = logging.getLogger('hf')
 
 # ── Configuration ──────────────────────────────────────────────────────────────
+# Version format YYMM.### — ### increments every build and resets to 001 at the
+# start of each month (see CLAUDE.md packaging rule).
+APP_VERSION = '2607.003'
+
 DEFAULT_LAT = 39.8
 DEFAULT_LON = -98.6
 REFRESH_INTERVAL   = 900   # seconds — local dev background thread
@@ -379,7 +383,8 @@ def _refresh_loop():
 def index():
     return render_template('index.html',
                            default_lat=DEFAULT_LAT,
-                           default_lon=DEFAULT_LON)
+                           default_lon=DEFAULT_LON,
+                           app_version=APP_VERSION)
 
 
 # ── Tracking endpoints ─────────────────────────────────────────────────────────

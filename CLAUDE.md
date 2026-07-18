@@ -66,6 +66,7 @@ compact CSS, camelCase JS). Terraform: `terraform fmt` after edits.
 
 ## Decisions log
 <!-- Append after each major decision. Newest first. -->
+- 2026-07-18 — Version scheme `YYMM.###` in `APP_VERSION` (app.py), shown in About modal — `###` bumps each build, resets to 001 each month — rejected semver (overkill for a continuously-deployed single app)
 - 2026-07-18 — Adopted house style + Ruff lint-only (no formatter) — avoids reformat churn, keeps aligned-column readability — rejected Black/strict PEP 8 and Prettier
 - 2026-06-23 — Vectorized propagation model with numpy — full-grid heatmap in one pass instead of Python double loop — rejected per-cell loop micro-opts
 - 2026-06-22 — Replaced `requests` with stdlib `urllib` — shrinks lambda.zip, one less dependency
@@ -89,7 +90,12 @@ compact CSS, camelCase JS). Terraform: `terraform fmt` after edits.
 
 ### 1. Repackage lambda.zip after every code change
 
-Any edit to `app.py`, `propagation.py`, or `templates/` requires rebuilding the zip before the task is reported as done:
+Any edit to `app.py`, `propagation.py`, or `templates/` requires rebuilding the zip before the task is reported as done.
+
+**Step 0 — bump the version.** `APP_VERSION` in `app.py` uses the format `YYMM.###`
+(e.g. `2607.003` = 3rd build of July 2026). Increment `###` on every build; when the
+month rolls over, restart at `.001` with the new `YYMM`. The version is shown in the
+Help/About modal (`Version {{ app_version }}`).
 
 ```powershell
 $pkg = "lambda_package"
