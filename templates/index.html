@@ -392,7 +392,7 @@
     #header-teaser-mini:hover { color:#38bdf8; text-decoration:underline; }
 
     /* ── Lock controls when not logged in ───────────────────── */
-    #panel-body.panel-locked #band-select,
+    /* Band selection stays open to everyone; only QTH + antenna are locked. */
     #panel-body.panel-locked #ant-enable,
     #panel-body.panel-locked #ant-controls,
     #panel-body.panel-locked .method-btn,
@@ -416,7 +416,7 @@
     <div>
       <h1>HF Propagation</h1>
       <div id="callsign-badge" onclick="onBadgeClick()" title="Click to sign in / edit callsign">Sign In / Register</div>
-      <div id="header-teaser-mini" onclick="showLoginModal()" style="display:none">Sign in to change bands, QTH &amp; antenna</div>
+      <div id="header-teaser-mini" onclick="showLoginModal()" style="display:none">Sign in to set your QTH &amp; antenna</div>
     </div>
     <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
       <button id="help-btn" onclick="showHelp()" title="Help / About">?</button>
@@ -428,9 +428,8 @@
 
     <!-- Login teaser — hidden once signed in -->
     <div id="login-teaser">
-      <p>Sign in or register to:</p>
+      <p>Change bands freely. Sign in or register to also:</p>
       <ul>
-        <li>Change HF bands</li>
         <li>Set your QTH location</li>
         <li>Configure antenna model</li>
       </ul>
@@ -702,7 +701,7 @@
       <div id="li-reset-wrap" style="display:none;margin-top:10px;text-align:center">
         <button class="modal-link-btn" onclick="showLoginView('reset-email')">Reset Password</button>
       </div>
-      <div class="modal-note">This service is free. We only use your callsign and login to save your settings and track overall app usage, not individual users.</div>
+      <div class="modal-note">Changing bands is open to everyone — sign in to set your QTH location and configure your antenna. This service is free. We only use your callsign and login to save your settings and track overall app usage, not individual users.</div>
     </div>
 
     <!-- View: new user registration -->
