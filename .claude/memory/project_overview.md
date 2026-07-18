@@ -14,7 +14,7 @@ Flask-based single-page web app that displays a real-time HF radio propagation h
 **Production URL:** https://propagation.ggcloud.us
 
 **Stack:**
-- Backend: Flask (Python), `propagation.py` for ionospheric modelling, `requests` for solar data, `boto3` for DynamoDB
+- Backend: Flask (Python), `propagation.py` for numpy-vectorized ionospheric modelling, stdlib `urllib` for solar data (replaced `requests`), `boto3` for DynamoDB
 - Frontend: D3 v7 + d3-geo-projection v4 (Winkel Tripel projection) + topojson-client v3
 - Database: AWS DynamoDB — two tables: `hf_solar` (solar cache + history) and `hf_users` (visitor tracking)
 - Deployment: AWS Lambda (Function URL, Python 3.14) via a custom WSGI adapter in `app.py`
@@ -25,7 +25,8 @@ Flask-based single-page web app that displays a real-time HF radio propagation h
 - `app.py` — Flask routes, DynamoDB helpers, Lambda WSGI handler, background refresh thread (local only)
 - `propagation.py` — solar data fetch (hamqsl.com → NOAA fallback), MUF model, foF2 estimate
 - `templates/index.html` — all HTML/CSS/JS in one file (no build step)
-- `requirements.txt` — `flask`, `requests` only (boto3 is pre-installed in Lambda runtime)
+- `requirements.txt` — `flask`, `numpy` only (boto3 is pre-installed in Lambda runtime); `requirements-dev.txt` — `ruff` (lint, never packaged)
+- `ruff.toml` + `.claude/rules/code-style.md` — house style guide (PEP 8 relaxed, single quotes, aligned assignments OK, 110-col, Ruff lint-only, no auto-formatter)
 - `LOCAL_INSTALL.md` — local dev setup guide
 - `AWS_INSTALL.md` — Lambda + DynamoDB + CloudFront deployment guide
 
@@ -48,4 +49,4 @@ Flask-based single-page web app that displays a real-time HF radio propagation h
 
 **How to run locally:** `.\venv\Scripts\python.exe app.py` (must use venv — system Python 3.14 has Flask/Werkzeug incompatibility). Requires boto3 in venv and valid AWS credentials.
 
-**Lambda packaging:** `pip install flask requests -t lambda_package/`, copy source + templates, `Compress-Archive`. Handler: `app.handler`. No Mangum — custom WSGI adapter handles Lambda Function URL payload v2.0 directly.
+**Lambda packaging:** `pip install --platform manylinux_2_28_x86_64 --only-binary=:all: --target lambda_package flask numpy` (numpy MUST be manylinux `.so` wheels, not Windows `.pyd`), copy source + templates, `Compress-Archive` in `$env:TEMP` (OneDrive lock), copy to `lambda.zip`. Handler: `app.handler`. No Mangum — custom WSGI adapter handles Lambda Function URL payload v2.0 directly. Full script in CLAUDE.md rule 1.

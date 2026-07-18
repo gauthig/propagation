@@ -1,0 +1,20 @@
+# Lint-only config — no auto-formatter (house style keeps aligned assignments
+# and section banners that a formatter would destroy). See .claude/rules/code-style.md.
+line-length = 110
+target-version = "py313"
+
+[lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes (unused imports/vars, undefined names)
+    "B",   # bugbear (likely bugs)
+    "Q",   # quote consistency
+]
+ignore = [
+    "E221", # multiple spaces before operator — aligned assignments are house style
+    "E241", # multiple spaces after comma — aligned dict/call args are house style
+]
+
+[lint.flake8-quotes]
+inline-quotes = "single"

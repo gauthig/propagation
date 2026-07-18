@@ -17,8 +17,8 @@ venv/
 terraform/.terraform/
 terraform/*.tfstate
 terraform/*.tfstate.*
-terraform/.terraform.lock.hcl
 terraform/terraform.tfvars
+# NOTE: terraform/.terraform.lock.hcl IS committed — it pins provider versions
 
 # ── Local / editor ───────────────────────────────────────────
 .env

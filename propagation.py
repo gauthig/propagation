@@ -8,7 +8,7 @@ import datetime
 
 import numpy as np
 
-log = logging.getLogger("hf.propagation")
+log = logging.getLogger('hf.propagation')
 
 # Cache
 _solar_cache = None
@@ -59,7 +59,7 @@ def get_solar_indices():
         stale['stale'] = True
         return stale
 
-    log.warning("All solar data sources failed, using default values")
+    log.warning('All solar data sources failed, using default values')
     return {
         'SFI': 100, 'K-index': 2, 'A-index': 10,
         'Sunspot Number': 50, 'source': 'defaults', 'stale': True,
@@ -72,14 +72,14 @@ def _fetch_hamqsl():
     url = 'http://www.hamqsl.com/solarxml.php'
     try:
         status, content = http_get(url, timeout=10)
-        log.debug("[hamqsl] HTTP %s, %d bytes", status, len(content))
+        log.debug('[hamqsl] HTTP %s, %d bytes', status, len(content))
         if status != 200 or not content:
             return None
 
         root = ET.fromstring(content)
         sd = root.find('.//solardata')
         if sd is None:
-            log.warning("[hamqsl] <solardata> element not found")
+            log.warning('[hamqsl] <solardata> element not found')
             return None
 
         def txt(tag, default):
@@ -95,7 +95,7 @@ def _fetch_hamqsl():
             name = band_el.get('name', '')
             tod = band_el.get('time', '')
             cond = (band_el.text or '').strip()
-            band_cond[f"{name}_{tod}"] = cond
+            band_cond[f'{name}_{tod}'] = cond
 
         data = {
             'SFI': txt('solarflux', '100'),
@@ -105,16 +105,16 @@ def _fetch_hamqsl():
             'source': 'hamqsl.com',
             'band_conditions': band_cond,
         }
-        log.debug("[hamqsl] SFI=%s K=%s A=%s SSN=%s",
+        log.debug('[hamqsl] SFI=%s K=%s A=%s SSN=%s',
                   data['SFI'], data['K-index'], data['A-index'], data['Sunspot Number'])
         return data
 
     except ET.ParseError as e:
-        log.warning("[hamqsl] XML parse error: %s", e)
+        log.warning('[hamqsl] XML parse error: %s', e)
     except _NET_ERRORS as e:
-        log.warning("[hamqsl] Request error: %s", e)
+        log.warning('[hamqsl] Request error: %s', e)
     except Exception as e:
-        log.warning("[hamqsl] Unexpected error: %s", e)
+        log.warning('[hamqsl] Unexpected error: %s', e)
     return None
 
 
@@ -126,7 +126,7 @@ def _fetch_noaa():
             'https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json',
             timeout=10
         )
-        log.debug("[NOAA-K] HTTP %s", k_status)
+        log.debug('[NOAA-K] HTTP %s', k_status)
         k_index = 2.0
         a_index = 10.0
         if k_status == 200 and k_body:
@@ -143,7 +143,7 @@ def _fetch_noaa():
             'https://services.swpc.noaa.gov/json/solar-cycle/observed-solar-cycle-indices.json',
             timeout=10
         )
-        log.debug("[NOAA-SFI] HTTP %s", sfi_status)
+        log.debug('[NOAA-SFI] HTTP %s', sfi_status)
         if sfi_status == 200 and sfi_body:
             sfi_data = json.loads(sfi_body)
             valid = [e for e in sfi_data if e.get('f10.7', -1) > 0]
@@ -156,13 +156,13 @@ def _fetch_noaa():
             'SFI': sfi, 'K-index': k_index, 'A-index': a_index,
             'Sunspot Number': ssn, 'source': 'NOAA', 'band_conditions': {}
         }
-        log.debug("[NOAA] SFI=%s K=%s A=%s SSN=%s", sfi, k_index, a_index, ssn)
+        log.debug('[NOAA] SFI=%s K=%s A=%s SSN=%s', sfi, k_index, a_index, ssn)
         return data
 
     except _NET_ERRORS as e:
-        log.warning("[NOAA] Request error: %s", e)
+        log.warning('[NOAA] Request error: %s', e)
     except Exception as e:
-        log.warning("[NOAA] Unexpected error: %s", e)
+        log.warning('[NOAA] Unexpected error: %s', e)
     return None
 
 
@@ -225,8 +225,7 @@ def calculate_muf_map(station_lat, station_lon, freq_min, freq_max, solar_indice
     # ── Hop count / M-factor buckets by path length ───────────────────────────
     near = dist < 2000        # 1 hop
     mid  = (dist >= 2000) & (dist < 5000)   # 2 hops
-    far  = dist >= 5000       # 3 hops
-    m_factor = np.select([near, mid], [3.2, 3.7], default=4.1)
+    m_factor = np.select([near, mid], [3.2, 3.7], default=4.1)  # default = far (≥5000 km, 3 hops)
 
     # ── foF2 per hop midpoint; path MUF limited by the *weakest* (min) hop ────
     base = 0.01 * sfi + 3.5   # daytime peak scales ~linearly with SFI
@@ -305,7 +304,8 @@ def calculate_muf_map(station_lat, station_lon, freq_min, freq_max, solar_indice
     out_lat = LAT[valid].astype(int)
     out_lon = LON[valid].astype(int)
     out_str = np.round(strength[valid], 3)
-    heatmap = [[int(la), int(lo), float(st)] for la, lo, st in zip(out_lat, out_lon, out_str)]
+    heatmap = [[int(la), int(lo), float(st)]
+               for la, lo, st in zip(out_lat, out_lon, out_str, strict=True)]
 
-    log.debug("[propagation] %.3f MHz -> %d heatmap points", freq_center, len(heatmap))
+    log.debug('[propagation] %.3f MHz -> %d heatmap points', freq_center, len(heatmap))
     return heatmap

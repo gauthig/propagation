@@ -33,7 +33,7 @@ resource "aws_cloudfront_distribution" "hf_propagation" {
   enabled         = true
   comment         = "HF Propagation Map — ${local.fqdn}"
   aliases         = [local.fqdn]
-  price_class     = "PriceClass_100"  # US, Canada, Europe only (cheapest)
+  price_class     = "PriceClass_100" # US, Canada, Europe only (cheapest)
   is_ipv6_enabled = true
 
   origin {
@@ -56,7 +56,7 @@ resource "aws_cloudfront_distribution" "hf_propagation" {
     allowed_methods = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
     cached_methods  = ["GET", "HEAD"]
 
-    cache_policy_id          = data.aws_cloudfront_cache_policy.caching_disabled.id
+    cache_policy_id = data.aws_cloudfront_cache_policy.caching_disabled.id
     # AllViewerExceptHostHeader is required — without it Lambda rejects requests
     # because the Host header contains the CloudFront domain instead of the Function URL
     origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer_except_host_header.id

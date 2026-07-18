@@ -1,4 +1,4 @@
-# Claude Code — Project Guide
+# Project: Propagation — Claude Code Project Guide
 
 This file is read automatically by [Claude Code](https://claude.ai/code) whenever you open this project. It gives Claude the context needed to work on the HF Propagation Map effectively from any machine.
 
@@ -47,6 +47,43 @@ Detailed context is stored in `.claude/memory/`. Claude loads these automaticall
 | `feedback_lambda_packaging.md` | **Must-follow rule** — always repackage `lambda.zip` after code changes |
 
 ---
+
+## Style guide
+
+The full style guide lives in **`.claude/rules/code-style.md`** (loaded automatically).
+Summary: PEP 8 base with house relaxations (single quotes, aligned assignments,
+em-dash section banners, 110-col lines, no auto-formatter), enforced by Ruff lint:
+
+```powershell
+.\venv\Scripts\python.exe -m ruff check app.py propagation.py   # must pass before done
+```
+
+Config in `ruff.toml`; dev tools via `pip install -r requirements-dev.txt`.
+Frontend keeps the single-file `templates/index.html` house style (2-space indent,
+compact CSS, camelCase JS). Terraform: `terraform fmt` after edits.
+
+---
+
+## Decisions log
+<!-- Append after each major decision. Newest first. -->
+- 2026-07-18 — Adopted house style + Ruff lint-only (no formatter) — avoids reformat churn, keeps aligned-column readability — rejected Black/strict PEP 8 and Prettier
+- 2026-06-23 — Vectorized propagation model with numpy — full-grid heatmap in one pass instead of Python double loop — rejected per-cell loop micro-opts
+- 2026-06-22 — Replaced `requests` with stdlib `urllib` — shrinks lambda.zip, one less dependency
+- 2026-06-22 — DynamoDB `hf_solar` uses a `current` fast-lookup row + TTL-expiring history rows — O(1) reads, no Scan cost
+
+## Known gotchas
+- OneDrive locks `lambda.zip` mid-sync — build the zip in `$env:TEMP`, then copy into the repo; on file-lock errors wait ~30 s for sync and retry.
+- Local runs must use `.\venv\Scripts\python.exe` — system Python 3.14 has a Flask/Werkzeug incompatibility.
+- numpy in `lambda.zip` must be **manylinux** wheels (`.so` files), never Windows `.pyd` — see packaging rule below.
+- Broad `except Exception` around DynamoDB/SES/solar calls is intentional fail-soft design, not sloppiness.
+- `boto3` is imported in `app.py` but deliberately absent from `requirements.txt` — the Lambda runtime provides it.
+
+## Do / Don't for Claude
+- DO: run ruff and rebuild `lambda.zip` before reporting any `app.py`/`propagation.py`/`templates/` change done.
+- DO: follow the spec/test discipline from global instructions; update this file after major work.
+- DON'T: deploy (`terraform apply`, Lambda zip upload) or `git push` without asking.
+- DON'T: hand-edit `lambda.zip` or `lambda_package/` — always rebuild via the packaging rule.
+- DON'T: re-raise declined optimizations (propagation loop micro-opt, index.html minify).
 
 ## Rules Claude must always follow
 

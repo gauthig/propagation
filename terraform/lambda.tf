@@ -11,16 +11,13 @@ resource "aws_lambda_function" "hf_propagation" {
   handler       = "app.handler"
   role          = aws_iam_role.lambda_exec.arn
 
-  memory_size = 512  # heatmap loop runs ~1800 trig calls per request
-  timeout     = 30   # allows for slow solar data fetches from hamqsl.com
+  memory_size = 512 # heatmap loop runs ~1800 trig calls per request
+  timeout     = 30  # allows for slow solar data fetches from hamqsl.com
 
+  # AWS_REGION is a reserved Lambda key — the runtime injects it; setting it here
+  # fails apply with a ValidationException.
   environment {
-    variables = merge(
-      {
-        AWS_REGION = var.aws_region
-      },
-      var.ses_sender_email != "" ? { SES_SENDER_EMAIL = var.ses_sender_email } : {}
-    )
+    variables = var.ses_sender_email != "" ? { SES_SENDER_EMAIL = var.ses_sender_email } : {}
   }
 
   tags = var.tags

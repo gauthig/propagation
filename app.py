@@ -202,17 +202,17 @@ def _get_solar_db():
             return None
         age = time.time() - float(item.get('timestamp_epoch', 0))
         if age > SOLAR_MAX_AGE_SECS:
-            log.debug("[dynamo] solar data is %.1f h old — needs refresh", age / 3600)
+            log.debug('[dynamo] solar data is %.1f h old — needs refresh', age / 3600)
             return None
         data = _from_dynamo(item)
         data.pop('record_id', None)
         data.pop('expire_at', None)
         data['last_update'] = data.pop('timestamp_epoch', time.time())
-        log.debug("[dynamo] solar cache hit — age %.0f min, by=%s",
+        log.debug('[dynamo] solar cache hit — age %.0f min, by=%s',
                   age / 60, data.get('refreshed_by', '?'))
         return data
     except Exception as e:
-        log.warning("[dynamo] solar read error: %s", e)
+        log.warning('[dynamo] solar read error: %s', e)
         return None
 
 
@@ -233,10 +233,10 @@ def _put_solar_db(data, refreshed_by='auto'):
         expire_at  = int(now.timestamp()) + SOLAR_HISTORY_TTL_DAYS * 86400
         _solar_table.put_item(Item={**base, 'record_id': history_id, 'expire_at': expire_at})
 
-        log.debug("[dynamo] solar written — current + history %s by %s",
+        log.debug('[dynamo] solar written — current + history %s by %s',
                   history_id, base['refreshed_by'])
     except Exception as e:
-        log.warning("[dynamo] solar write error: %s", e)
+        log.warning('[dynamo] solar write error: %s', e)
 
 
 def _fetch_and_cache_solar(refreshed_by='auto'):
@@ -273,7 +273,7 @@ def _upsert_user(callsign, ip, session_id=None):
             ExpressionAttributeValues=values,
         )
     except Exception as e:
-        log.warning("[dynamo] upsert_user error: %s", e)
+        log.warning('[dynamo] upsert_user error: %s', e)
 
 
 def _track_visit(callsign, ip):
@@ -300,7 +300,7 @@ def _track_qth(callsign, lat, lon, method):
             },
         )
     except Exception as e:
-        log.warning("[dynamo] track_qth error: %s", e)
+        log.warning('[dynamo] track_qth error: %s', e)
 
 
 # ── In-process cache (warm Lambda instance / local dev) ───────────────────────
@@ -357,19 +357,19 @@ def _refresh_loop():
     """Local dev background thread — keeps solar fresh and pre-warms 20m/40m."""
     while True:
         try:
-            log.info("[refresh] fetching solar indices...")
+            log.info('[refresh] fetching solar indices...')
             solar = _fetch_and_cache_solar()
             with _lock:
                 lat = _cache['cache_lat']
                 lon = _cache['cache_lon']
                 _cache['solar']       = solar
                 _cache['last_update'] = time.time()
-            log.info("[refresh] pre-computing 20m and 40m...")
+            log.info('[refresh] pre-computing 20m and 40m...')
             d20 = _compute_heatmap('20m', lat, lon, solar)
             d40 = _compute_heatmap('40m', lat, lon, solar)
-            log.info("[refresh] done — 20m=%d pts, 40m=%d pts", len(d20), len(d40))
+            log.info('[refresh] done — 20m=%d pts, 40m=%d pts', len(d20), len(d40))
         except Exception:
-            log.exception("[refresh] ERROR")
+            log.exception('[refresh] ERROR')
         time.sleep(REFRESH_INTERVAL)
 
 
@@ -535,7 +535,10 @@ def auth_reset_request():
             ExpressionAttributeValues={':t': reset_token, ':e': exp},
         )
         _send_reset_email(stored_email, callsign, reset_token)
-        masked = stored_email[:2] + '***@' + stored_email.split('@')[-1] if '@' in stored_email else stored_email[:3] + '***'
+        if '@' in stored_email:
+            masked = stored_email[:2] + '***@' + stored_email.split('@')[-1]
+        else:
+            masked = stored_email[:3] + '***'
         return jsonify({'ok': True, 'email_masked': masked})
     except Exception as e:
         log.warning('[auth] reset_request error: %s', e)
@@ -566,15 +569,21 @@ def auth_reset_confirm():
                 exp_dt = exp_dt.replace(tzinfo=datetime.timezone.utc)
             if exp_dt < datetime.datetime.now(datetime.timezone.utc):
                 return jsonify({'error': 'token_expired'}), 400
+        now      = datetime.datetime.now(datetime.timezone.utc)
         pw_hash  = _hash_password(new_pw)
         new_tok  = secrets.token_urlsafe(32)
-        new_exp  = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=AUTH_COOKIE_DAYS)).isoformat()
+        new_exp  = (now + datetime.timedelta(days=AUTH_COOKIE_DAYS)).isoformat()
         _users_table.update_item(
             Key={'callsign': callsign},
-            UpdateExpression='SET password_hash = :ph, auth_token = :at, auth_expires = :ae REMOVE reset_token, reset_token_expires',
+            UpdateExpression=(
+                'SET password_hash = :ph, auth_token = :at, auth_expires = :ae '
+                'REMOVE reset_token, reset_token_expires'
+            ),
             ExpressionAttributeValues={':ph': pw_hash, ':at': new_tok, ':ae': new_exp},
         )
-        resp = make_response(jsonify({'ok': True, 'callsign': callsign, 'admin': bool(item.get('admin', False))}))
+        resp = make_response(jsonify({
+            'ok': True, 'callsign': callsign, 'admin': bool(item.get('admin', False)),
+        }))
         return _set_auth_cookie(resp, callsign, new_tok)
     except Exception as e:
         log.warning('[auth] reset_confirm error: %s', e)

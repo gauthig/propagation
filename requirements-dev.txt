@@ -1,0 +1,2 @@
+# Dev-only tools — never packaged into lambda.zip
+ruff
