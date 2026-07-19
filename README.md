@@ -2,6 +2,8 @@
 
 A real-time HF skywave propagation visualizer for amateur radio operators. Shows estimated band openness from your QTH to every point on the globe, driven by live solar indices and a physics-based ionospheric model.
 
+**🌐 Live site: [propagation.ggcloud.us](https://propagation.ggcloud.us/)** — free to use, no sign-up required.
+
 ![Stack](https://img.shields.io/badge/Python-3.14-blue) ![Flask](https://img.shields.io/badge/Flask-3.x-green) ![AWS Lambda](https://img.shields.io/badge/Deploy-AWS%20Lambda-orange) ![DynamoDB](https://img.shields.io/badge/DB-DynamoDB-yellow) ![License](https://img.shields.io/badge/License-GPL--3.0-blue)
 
 > **Working on this project?** This project is developed with [Claude Code](https://claude.ai/code). See [CLAUDE.md](CLAUDE.md) for setup instructions, including how to install the project memory files so Claude has full context on any machine.
