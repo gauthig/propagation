@@ -307,7 +307,7 @@ Request a **wildcard certificate** so any subdomain is covered without a new cer
 3. **Origin type:** Other (Custom origin)
 4. **Protocol:** HTTPS only
 5. **Allowed HTTP methods:** GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE
-6. **Cache policy:** `UseOriginCacheControlHeaders` — caches only responses where the app sends a `Cache-Control` header (`/`, `/robots.txt`, `/sitemap.xml`); every other route sends no header and stays fully dynamic
+6. **Cache policy:** CachingDisabled for the default behavior, then add three cache behaviors with path patterns `/`, `/robots.txt`, and `/sitemap.xml` using **CachingOptimized** (the app sends `Cache-Control` on those routes and CloudFront honors the TTLs). Do **not** use `UseOriginCacheControlHeaders` — it puts the Host header in the cache key, which forwards the viewer Host to the origin, and Lambda Function URLs reject that with 403
 7. **Origin request policy:** `AllViewerExceptHostHeader` — **required**; without this Lambda rejects every request with a host header mismatch
 8. **Alternate domain names:** your custom subdomain (e.g. `propagation.yourdomain.com`)
 9. **Custom SSL certificate:** select the ACM wildcard cert

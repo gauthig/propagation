@@ -66,7 +66,7 @@ compact CSS, camelCase JS). Terraform: `terraform fmt` after edits.
 
 ## Decisions log
 <!-- Append after each major decision. Newest first. -->
-- 2026-07-18 — SEO enablement + edge caching — meta description/OG/JSON-LD in index.html, new `/robots.txt` + `/sitemap.xml` routes; CloudFront default behavior switched CachingDisabled → UseOriginCacheControlHeaders so only routes that send `Cache-Control` (`/` 10 min, robots/sitemap 24 h) are edge-cached — rejected path-pattern cache behaviors (risk of catching API routes)
+- 2026-07-18 — SEO enablement + edge caching — meta description/OG/JSON-LD in index.html, new `/robots.txt` + `/sitemap.xml` routes; CloudFront ordered cache behaviors (CachingOptimized, exact paths `/`, `/robots.txt`, `/sitemap.xml`) over the CachingDisabled default, TTLs from Flask's Cache-Control (`/` 10 min, robots/sitemap 24 h) — rejected UseOriginCacheControlHeaders (Host in cache key is forwarded → Lambda Function URL 403, caused a brief outage before rollback) and a custom cache policy (IAM lacks cloudfront:CreateCachePolicy)
 - 2026-07-18 — Terraform is the deploy path (live infra imported into local state; apply ships lambda.zip) — replaces manual console zip upload — rejected recreating IAM with clean names (roles can't be renamed; adopted console-generated names instead)
 - 2026-07-18 — Version scheme `YYMM.###` in `APP_VERSION` (app.py), shown in About modal — `###` bumps each build, resets to 001 each month — rejected semver (overkill for a continuously-deployed single app)
 - 2026-07-18 — Adopted house style + Ruff lint-only (no formatter) — avoids reformat churn, keeps aligned-column readability — rejected Black/strict PEP 8 and Prettier
@@ -80,6 +80,7 @@ compact CSS, camelCase JS). Terraform: `terraform fmt` after edits.
 - numpy in `lambda.zip` must be **manylinux** wheels (`.so` files), never Windows `.pyd` — see packaging rule below.
 - Broad `except Exception` around DynamoDB/SES/solar calls is intentional fail-soft design, not sloppiness.
 - `boto3` is imported in `app.py` but deliberately absent from `requirements.txt` — the Lambda runtime provides it.
+- CloudFront cache policies that include `Host` in the cache key (e.g. managed `UseOriginCacheControlHeaders`) forward the viewer Host to the origin — Lambda Function URLs reject it with 403 and the whole site breaks. Stick to CachingDisabled / CachingOptimized.
 
 ## Do / Don't for Claude
 - DO: run ruff and rebuild `lambda.zip` before reporting any `app.py`/`propagation.py`/`templates/` change done.

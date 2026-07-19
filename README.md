@@ -175,7 +175,7 @@ Response: `{"zipcode": "90210", "city": "Beverly Hills", "state": "CA", "lat": 3
 
 ### `GET /robots.txt` · `GET /sitemap.xml`
 
-Static SEO endpoints for search-engine crawlers. Both are sent with `Cache-Control: public, max-age=86400`, and the root page with `max-age=600`, which opts them into CloudFront edge caching (the distribution uses the `UseOriginCacheControlHeaders` policy — routes that send no `Cache-Control` header are never cached). robots.txt disallows the API prefixes (`/auth/`, `/admin/`, `/track/`, `/solar`, `/heatmap/`, `/zip/`).
+Static SEO endpoints for search-engine crawlers. Both are sent with `Cache-Control: public, max-age=86400`, and the root page with `max-age=600`. CloudFront has dedicated cache behaviors (CachingOptimized) for exactly `/`, `/robots.txt`, and `/sitemap.xml` that honor those TTLs; every other route uses the CachingDisabled default and always reaches the app. robots.txt disallows the API prefixes (`/auth/`, `/admin/`, `/track/`, `/solar`, `/heatmap/`, `/zip/`).
 
 ---
 

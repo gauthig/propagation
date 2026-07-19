@@ -24,11 +24,15 @@ resource "aws_acm_certificate" "wildcard" {
 # Hardcoded instead of data-source lookups so plan/apply doesn't require the
 # cloudfront:ListCachePolicies / ListOriginRequestPolicies IAM permissions.
 locals {
-  # UseOriginCacheControlHeaders — min/default TTL 0, so CloudFront caches ONLY responses
-  # where Flask sends a Cache-Control header (/, /robots.txt, /sitemap.xml). All other
-  # routes send no header and stay fully dynamic. NOTE: this policy excludes query strings
-  # from the cache key — never send Cache-Control from a query-varying route (e.g. /heatmap).
-  cache_policy_use_origin_cache_headers    = "83da9c7e-98b4-4e11-a168-04f0df8e2c65" # UseOriginCacheControlHeaders
+  # CachingDisabled stays the DEFAULT — every API route passes straight to Lambda.
+  # CachingOptimized is used only by the ordered behaviors below (/, robots.txt,
+  # sitemap.xml); it keeps no Host header in the cache key (a managed policy with
+  # Host in the key forwards it and Lambda Function URLs reject that with 403 —
+  # verified 2026-07-18) and honors the origin Cache-Control TTLs Flask sends.
+  # The managed UseOriginCacheControlHeaders policy is unusable here for the same
+  # Host-header reason, and IAM lacks cloudfront:CreateCachePolicy for a custom one.
+  cache_policy_caching_disabled            = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad" # CachingDisabled
+  cache_policy_caching_optimized           = "658327ea-f89d-4fab-a63d-7e88639e58f6" # CachingOptimized
   origin_policy_all_viewer_except_host_hdr = "b689b0a8-53d0-40ab-baf2-68738e2966ac" # AllViewerExceptHostHeader
 }
 
@@ -63,12 +67,32 @@ resource "aws_cloudfront_distribution" "hf_propagation" {
     allowed_methods = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
     cached_methods  = ["GET", "HEAD"]
 
-    cache_policy_id = local.cache_policy_use_origin_cache_headers
+    cache_policy_id = local.cache_policy_caching_disabled
     # AllViewerExceptHostHeader is required — without it Lambda rejects requests
     # because the Host header contains the CloudFront domain instead of the Function URL
     origin_request_policy_id = local.origin_policy_all_viewer_except_host_hdr
 
     compress = true
+  }
+
+  # ── Edge-cached static paths — exact matches only ───────────────────────────
+  # CachingOptimized honors origin Cache-Control within min 1 s / max 365 d, so the
+  # effective TTLs are what Flask sends: / = 600 s, robots.txt / sitemap.xml = 86400 s.
+  dynamic "ordered_cache_behavior" {
+    for_each = ["/", "/robots.txt", "/sitemap.xml"]
+    content {
+      path_pattern           = ordered_cache_behavior.value
+      target_origin_id       = "lambda-function-url"
+      viewer_protocol_policy = "redirect-to-https"
+
+      allowed_methods = ["GET", "HEAD"]
+      cached_methods  = ["GET", "HEAD"]
+
+      cache_policy_id          = local.cache_policy_caching_optimized
+      origin_request_policy_id = local.origin_policy_all_viewer_except_host_hdr
+
+      compress = true
+    }
   }
 
   viewer_certificate {
