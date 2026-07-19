@@ -28,7 +28,7 @@ log = logging.getLogger('hf')
 # ── Configuration ──────────────────────────────────────────────────────────────
 # Version format YYMM.### — ### increments every build and resets to 001 at the
 # start of each month (see CLAUDE.md packaging rule).
-APP_VERSION = '2607.004'
+APP_VERSION = '2607.005'
 SITE_URL    = 'https://propagation.ggcloud.us'  # canonical origin — used by robots.txt / sitemap.xml
 
 DEFAULT_LAT = 39.8
@@ -427,6 +427,23 @@ def robots_txt():
 @app.route('/sitemap.xml')
 def sitemap_xml():
     resp = make_response(_SITEMAP_XML)
+    resp.headers['Content-Type']  = 'application/xml; charset=utf-8'
+    resp.headers['Cache-Control'] = 'public, max-age=86400'
+    return resp
+
+
+# Bing Webmaster Tools ownership verification — Bing fetches this exact path.
+_BING_SITE_AUTH = (
+    '<?xml version="1.0"?>\n'
+    '<users>\n'
+    '\t<user>F8641D4357DB61C3568AA9400AB2B4BF</user>\n'
+    '</users>\n'
+)
+
+
+@app.route('/BingSiteAuth.xml')
+def bing_site_auth():
+    resp = make_response(_BING_SITE_AUTH)
     resp.headers['Content-Type']  = 'application/xml; charset=utf-8'
     resp.headers['Cache-Control'] = 'public, max-age=86400'
     return resp

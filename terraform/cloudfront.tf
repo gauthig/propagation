@@ -79,7 +79,7 @@ resource "aws_cloudfront_distribution" "hf_propagation" {
   # CachingOptimized honors origin Cache-Control within min 1 s / max 365 d, so the
   # effective TTLs are what Flask sends: / = 600 s, robots.txt / sitemap.xml = 86400 s.
   dynamic "ordered_cache_behavior" {
-    for_each = ["/", "/robots.txt", "/sitemap.xml"]
+    for_each = ["/", "/robots.txt", "/sitemap.xml", "/BingSiteAuth.xml"]
     content {
       path_pattern           = ordered_cache_behavior.value
       target_origin_id       = "lambda-function-url"

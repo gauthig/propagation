@@ -14,6 +14,7 @@ metadata:
 | `/` | GET | Renders `index.html` with `default_lat`, `default_lon`; `Cache-Control: public, max-age=600` → CloudFront edge-cached |
 | `/robots.txt` | GET | Static crawler directives (disallows API prefixes); `Cache-Control` 24 h → edge-cached |
 | `/sitemap.xml` | GET | Single-URL sitemap; `Cache-Control` 24 h → edge-cached |
+| `/BingSiteAuth.xml` | GET | Bing Webmaster ownership verification; `Cache-Control` 24 h → edge-cached |
 | `/heatmap/<band>` | GET | Returns `[[lat, lon, strength], …]` heatmap array |
 | `/solar` | GET | Returns solar indices — DynamoDB `GetItem('current')` first, fetches if >2 h old |
 | `/solar/refresh` | POST | Forces a fresh solar fetch regardless of cache age (WB0Z-only button) |
@@ -44,7 +45,7 @@ metadata:
 - All DynamoDB errors are caught and logged; endpoints always return `{"ok": true}` so JS fires-and-forgets
 
 ### Edge-caching contract (since 2607.004)
-- CloudFront has ordered cache behaviors (managed **CachingOptimized**) for exactly `/`, `/robots.txt`, `/sitemap.xml`; the default behavior stays **CachingDisabled**, so every other route is always dynamic
+- CloudFront has ordered cache behaviors (managed **CachingOptimized**) for exactly `/`, `/robots.txt`, `/sitemap.xml`, `/BingSiteAuth.xml`; the default behavior stays **CachingDisabled**, so every other route is always dynamic
 - Effective TTLs come from Flask's `Cache-Control` headers: `/` = 600 s, robots/sitemap = 86400 s (CachingOptimized honors origin Cache-Control within min 1 s / max 365 d; a response on those paths WITHOUT the header would default to 24 h — always send it)
 - **Never use a cache policy with Host in the cache key** (e.g. managed UseOriginCacheControlHeaders) — cache-key headers are forwarded to the origin and Lambda Function URLs 403 on a mismatched Host (verified in prod 2026-07-18, required a rollback)
 
