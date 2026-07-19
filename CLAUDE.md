@@ -66,6 +66,7 @@ compact CSS, camelCase JS). Terraform: `terraform fmt` after edits.
 
 ## Decisions log
 <!-- Append after each major decision. Newest first. -->
+- 2026-07-18 — Terraform is the deploy path (live infra imported into local state; apply ships lambda.zip) — replaces manual console zip upload — rejected recreating IAM with clean names (roles can't be renamed; adopted console-generated names instead)
 - 2026-07-18 — Version scheme `YYMM.###` in `APP_VERSION` (app.py), shown in About modal — `###` bumps each build, resets to 001 each month — rejected semver (overkill for a continuously-deployed single app)
 - 2026-07-18 — Adopted house style + Ruff lint-only (no formatter) — avoids reformat churn, keeps aligned-column readability — rejected Black/strict PEP 8 and Prettier
 - 2026-06-23 — Vectorized propagation model with numpy — full-grid heatmap in one pass instead of Python double loop — rejected per-cell loop micro-opts
@@ -152,13 +153,27 @@ Lambda is running **Python 3.14**. Do not use syntax or stdlib features that req
 ```
 Must use the venv — system Python 3.14 has a Flask/Werkzeug incompatibility.
 
-**Deploy (Terraform):**
-```bash
-cd terraform && terraform apply
+**Deploy (Terraform — the standard path):**
+```powershell
+terraform -chdir=terraform plan -out=tfplan   # review the plan first — expect only intended changes
+terraform -chdir=terraform apply tfplan
 ```
+Terraform manages ALL live infrastructure (imported 2026-07-18) including the Lambda
+code — `apply` uploads `lambda.zip` whenever its hash changes, so the flow is:
+bump `APP_VERSION` → rebuild `lambda.zip` (rule 1) → plan → apply. Requirements:
+- State is local and gitignored (`terraform/terraform.tfstate`) — it only exists on
+  this machine; a fresh clone must re-import via `terraform/import.sh`.
+- Real variable values live in gitignored `terraform/terraform.tfvars`
+  (notably `ses_sender_email`) — without it, apply would strip the SES env var.
+- The deploy IAM user needs write permissions (PowerUserAccess + IAMFullAccess or
+  equivalent); day-to-day read-only creds can run `plan` but not `apply`.
+- Never `apply` with unexplained plan lines — the WAF web ACL and TLS 1.3 minimum
+  are declared in `cloudfront.tf` and must never show as removals.
 
-**Deploy (manual zip upload):**
+**Deploy (manual zip upload — fallback only):**
 Lambda console → Code tab → Upload from → .zip file → select `lambda.zip` → Save.
+Note this drifts `source_code_hash` in state; the next `terraform apply` will
+re-upload the local zip.
 
 ---
 
