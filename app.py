@@ -28,7 +28,8 @@ log = logging.getLogger('hf')
 # ── Configuration ──────────────────────────────────────────────────────────────
 # Version format YYMM.### — ### increments every build and resets to 001 at the
 # start of each month (see CLAUDE.md packaging rule).
-APP_VERSION = '2607.003'
+APP_VERSION = '2607.004'
+SITE_URL    = 'https://propagation.ggcloud.us'  # canonical origin — used by robots.txt / sitemap.xml
 
 DEFAULT_LAT = 39.8
 DEFAULT_LON = -98.6
@@ -381,10 +382,54 @@ def _refresh_loop():
 
 @app.route('/')
 def index():
-    return render_template('index.html',
-                           default_lat=DEFAULT_LAT,
-                           default_lon=DEFAULT_LON,
-                           app_version=APP_VERSION)
+    resp = make_response(render_template('index.html',
+                                         default_lat=DEFAULT_LAT,
+                                         default_lon=DEFAULT_LON,
+                                         app_version=APP_VERSION))
+    # Cache-Control opts this route into CloudFront edge caching — the distribution uses the
+    # UseOriginCacheControlHeaders policy, so routes without this header are never cached.
+    resp.headers['Cache-Control'] = 'public, max-age=600'
+    return resp
+
+
+# ── SEO / crawler endpoints ────────────────────────────────────────────────────
+# Static per-deploy. The long Cache-Control opts them into CloudFront edge caching
+# (see terraform/cloudfront.tf) so crawler traffic rarely reaches Lambda.
+
+_ROBOTS_TXT = (
+    'User-agent: *\n'
+    'Disallow: /auth/\n'
+    'Disallow: /admin/\n'
+    'Disallow: /track/\n'
+    'Disallow: /solar\n'
+    'Disallow: /heatmap/\n'
+    'Disallow: /zip/\n'
+    '\n'
+    'Sitemap: ' + SITE_URL + '/sitemap.xml\n'
+)
+
+_SITEMAP_XML = (
+    '<?xml version="1.0" encoding="UTF-8"?>\n'
+    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+    '  <url><loc>' + SITE_URL + '/</loc><changefreq>weekly</changefreq></url>\n'
+    '</urlset>\n'
+)
+
+
+@app.route('/robots.txt')
+def robots_txt():
+    resp = make_response(_ROBOTS_TXT)
+    resp.headers['Content-Type']  = 'text/plain; charset=utf-8'
+    resp.headers['Cache-Control'] = 'public, max-age=86400'
+    return resp
+
+
+@app.route('/sitemap.xml')
+def sitemap_xml():
+    resp = make_response(_SITEMAP_XML)
+    resp.headers['Content-Type']  = 'application/xml; charset=utf-8'
+    resp.headers['Cache-Control'] = 'public, max-age=86400'
+    return resp
 
 
 # ── Tracking endpoints ─────────────────────────────────────────────────────────

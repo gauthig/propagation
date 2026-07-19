@@ -42,7 +42,7 @@ Flask-based single-page web app that displays a real-time HF radio propagation h
 - ACM wildcard cert `*.ggcloud.us` — must be in us-east-1 regardless of Lambda region
 - CloudFront origin: Lambda Function URL (bare hostname, no https://)
 - Origin request policy: **AllViewerExceptHostHeader** — critical, without this Lambda rejects the request (Host header mismatch)
-- Cache policy: CachingDisabled
+- Cache policy: **UseOriginCacheControlHeaders** (since build 2607.004) — only routes that send `Cache-Control` are edge-cached: `/` (10 min), `/robots.txt` + `/sitemap.xml` (24 h); API routes send none and stay dynamic. Policy excludes query strings from the cache key — never send `Cache-Control` from a query-varying route
 - Allowed methods: GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE (POST needed for tracking endpoints)
 - Cloudflare DNS: CNAME `propagation` → CloudFront domain, proxy **OFF** (grey cloud / DNS only) — orange cloud conflicts with CloudFront SSL
 - A bare CNAME directly to the Lambda Function URL does NOT work — Lambda validates the Host header

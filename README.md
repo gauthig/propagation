@@ -18,6 +18,7 @@ A real-time HF skywave propagation visualizer for amateur radio operators. Shows
 - Lets you set your QTH by Maidenhead grid square, lat/lon, or US ZIP code
 - Tracks visitors in DynamoDB by callsign (the stable cross-browser identity), IP, QTH, and access count
 - Remembers your callsign and QTH across sessions via browser localStorage
+- Search-engine ready — meta description, Open Graph tags, schema.org JSON-LD, `/robots.txt`, and `/sitemap.xml`; CloudFront edge-caches the root page and SEO endpoints so crawler traffic rarely invokes Lambda
 
 ---
 
@@ -29,7 +30,7 @@ propagation/
 ├── propagation.py      # Ionospheric model — foF2, MUF, antenna factors
 ├── templates/
 │   └── index.html      # Single-page UI — D3 map, panel, all JavaScript
-├── requirements.txt    # flask, requests  (boto3 is pre-installed in the Lambda runtime)
+├── requirements.txt    # flask, numpy  (boto3 is pre-installed in the Lambda runtime)
 ├── LOCAL_INSTALL.md    # Running the app on your own machine
 └── AWS_INSTALL.md      # Deploying to AWS Lambda with DynamoDB and CloudFront
 ```
@@ -40,7 +41,7 @@ propagation/
 
 ![AWS Architecture Diagram](hf_propagation_aws_architecture.svg)
 
-*Browser → Cloudflare DNS → CloudFront (TLS via ACM) → Lambda Function URL → Flask app → DynamoDB. SES handles auth token emails. All resources tagged `app=hf_propagation` and collected in an AWS Resource Group.*
+*Browser → Cloudflare DNS → CloudFront (TLS via ACM) → Lambda Function URL → Flask app → DynamoDB. SES handles auth token emails. All resources tagged `app=hf_propagation` and collected in an AWS Resource Group. CloudFront serves `/`, `/robots.txt`, and `/sitemap.xml` from its edge cache (driven by origin `Cache-Control` headers); every other route passes through uncached.*
 
 ---
 
@@ -78,6 +79,7 @@ Your callsign and QTH are saved in browser localStorage and restored automatical
 | 80m | 3.5 – 4.0 MHz |
 | 60m | 5.33 – 5.404 MHz |
 | 40m | 7.0 – 7.3 MHz |
+| 30m | 10.1 – 10.15 MHz |
 | 20m | 14.0 – 14.35 MHz |
 | 17m | 18.068 – 18.168 MHz |
 | 15m | 21.0 – 21.45 MHz |
@@ -171,6 +173,12 @@ Response: `{"zipcode": "90210", "city": "Beverly Hills", "state": "CA", "lat": 3
 
 ---
 
+### `GET /robots.txt` · `GET /sitemap.xml`
+
+Static SEO endpoints for search-engine crawlers. Both are sent with `Cache-Control: public, max-age=86400`, and the root page with `max-age=600`, which opts them into CloudFront edge caching (the distribution uses the `UseOriginCacheControlHeaders` policy — routes that send no `Cache-Control` header are never cached). robots.txt disallows the API prefixes (`/auth/`, `/admin/`, `/track/`, `/solar`, `/heatmap/`, `/zip/`).
+
+---
+
 ### `POST /track/visit`
 
 Body: `{"callsign": "W1AW"}`. Upserts the visitor row, increments `access_count`, updates `last_seen` and `ip_address`. No-op if callsign is empty (anonymous visitors are not tracked).
@@ -230,7 +238,7 @@ Same attributes as above, but `record_id` is a UTC timestamp string (e.g. `2026-
 
 ## Propagation Model
 
-Implemented in `propagation.py` using the Python standard library only.
+Implemented in `propagation.py` with numpy-vectorized grid math; solar data is fetched with the stdlib `urllib`.
 
 **foF2** — empirical formula: `base = 0.01×SFI + 3.5`, tapered by latitude (cos^0.4) and a diurnal cosine peaking at 14:00 local time with a 45% nighttime floor.
 
@@ -256,7 +264,9 @@ Implemented in `propagation.py` using the Python standard library only.
 | Package | Purpose |
 |---|---|
 | `flask` | Web framework and template rendering |
-| `requests` | HTTP client for solar data fetches |
+| `numpy` | Vectorized heatmap grid computation |
+
+Solar data fetches use the stdlib `urllib` (the `requests` dependency was removed to shrink the Lambda zip).
 
 **Lambda runtime** (pre-installed — do not add to zip):
 

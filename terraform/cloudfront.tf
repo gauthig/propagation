@@ -24,7 +24,11 @@ resource "aws_acm_certificate" "wildcard" {
 # Hardcoded instead of data-source lookups so plan/apply doesn't require the
 # cloudfront:ListCachePolicies / ListOriginRequestPolicies IAM permissions.
 locals {
-  cache_policy_caching_disabled            = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad" # CachingDisabled
+  # UseOriginCacheControlHeaders — min/default TTL 0, so CloudFront caches ONLY responses
+  # where Flask sends a Cache-Control header (/, /robots.txt, /sitemap.xml). All other
+  # routes send no header and stay fully dynamic. NOTE: this policy excludes query strings
+  # from the cache key — never send Cache-Control from a query-varying route (e.g. /heatmap).
+  cache_policy_use_origin_cache_headers    = "83da9c7e-98b4-4e11-a168-04f0df8e2c65" # UseOriginCacheControlHeaders
   origin_policy_all_viewer_except_host_hdr = "b689b0a8-53d0-40ab-baf2-68738e2966ac" # AllViewerExceptHostHeader
 }
 
@@ -59,7 +63,7 @@ resource "aws_cloudfront_distribution" "hf_propagation" {
     allowed_methods = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
     cached_methods  = ["GET", "HEAD"]
 
-    cache_policy_id = local.cache_policy_caching_disabled
+    cache_policy_id = local.cache_policy_use_origin_cache_headers
     # AllViewerExceptHostHeader is required — without it Lambda rejects requests
     # because the Host header contains the CloudFront domain instead of the Function URL
     origin_request_policy_id = local.origin_policy_all_viewer_except_host_hdr

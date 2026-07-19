@@ -3,12 +3,45 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>HF Propagation</title>
+  <title>HF Propagation Map — Real-Time Ham Radio Band Conditions</title>
+  <meta name="description" content="Free real-time HF propagation map for ham radio operators. Live band conditions for 80m–10m from current solar flux, K-index, and sunspot data.">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://propagation.ggcloud.us/">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="HF Propagation Map">
+  <meta property="og:title" content="HF Propagation Map — Real-Time Ham Radio Band Conditions">
+  <meta property="og:description" content="Free real-time HF propagation map for ham radio operators. Live band conditions for 80m–10m from current solar flux, K-index, and sunspot data.">
+  <meta property="og:url" content="https://propagation.ggcloud.us/">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="HF Propagation Map — Real-Time Ham Radio Band Conditions">
+  <meta name="twitter:description" content="Free real-time HF propagation map for ham radio operators. Live band conditions for 80m–10m from current solar flux, K-index, and sunspot data.">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "HF Propagation Map",
+    "url": "https://propagation.ggcloud.us/",
+    "description": "Free real-time HF propagation map for amateur radio operators. Live skywave band conditions for the 80m through 10m ham bands, computed from current solar flux, K-index, A-index, and sunspot data.",
+    "applicationCategory": "UtilitiesApplication",
+    "operatingSystem": "Any (web browser)",
+    "isAccessibleForFree": true,
+    "creator": { "@type": "Person", "name": "Garrett, WB0Z" },
+    "keywords": "HF propagation, propagation map, ham radio band conditions, amateur radio, band openings, MUF, maximum usable frequency, solar flux index, K-index, sunspot number, solar conditions, DX, ham tools",
+    "featureList": [
+      "Real-time HF propagation heatmap for the 80m through 10m amateur bands",
+      "Live solar data: solar flux index (SFI), K-index, A-index, sunspot number",
+      "Maximum usable frequency (MUF) model with multi-hop skywave paths",
+      "Antenna patterns: vertical, dipole, and hex beam",
+      "Set your QTH by Maidenhead grid square, lat/lon, or US ZIP code"
+    ]
+  }
+  </script>
   <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/d3-geo-projection@4/dist/d3-geo-projection.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; }
+    .sr-only { position:absolute; width:1px; height:1px; margin:-1px; padding:0; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
     html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden;
       font-family:'Segoe UI',Arial,sans-serif; background:#0d1117; }
 
@@ -405,6 +438,17 @@
 </head>
 <body>
 
+<!-- Crawlable summary — visually hidden, read by search engines and screen readers -->
+<p class="sr-only">HF Propagation Map is a free, real-time amateur radio tool showing HF skywave band
+  conditions and band openings worldwide. The heatmap estimates the maximum usable frequency (MUF)
+  and ionospheric foF2 from live solar data — solar flux index, K-index, A-index, and sunspot
+  number — for the 80m through 10m ham bands, with vertical, dipole, and hex beam antenna patterns
+  applied from your QTH.</p>
+<noscript>
+  <p>This interactive HF propagation map requires JavaScript. It shows real-time ham radio band
+    conditions for 80m–10m, driven by live solar flux, K-index, and sunspot data.</p>
+</noscript>
+
 <div id="map-wrap">
   <svg id="worldmap"></svg>
   <canvas id="heat-canvas"></canvas>
@@ -414,7 +458,7 @@
 <div id="panel">
   <div id="panel-header">
     <div>
-      <h1>HF Propagation</h1>
+      <h1>HF Propagation Map</h1>
       <div id="callsign-badge" onclick="onBadgeClick()" title="Click to sign in / edit callsign">Sign In / Register</div>
       <div id="header-teaser-mini" onclick="showLoginModal()" style="display:none">Sign in to set your QTH &amp; antenna</div>
     </div>

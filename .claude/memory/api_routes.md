@@ -11,7 +11,9 @@ metadata:
 
 | Route | Method | Description |
 |---|---|---|
-| `/` | GET | Renders `index.html` with `default_lat`, `default_lon` |
+| `/` | GET | Renders `index.html` with `default_lat`, `default_lon`; `Cache-Control: public, max-age=600` → CloudFront edge-cached |
+| `/robots.txt` | GET | Static crawler directives (disallows API prefixes); `Cache-Control` 24 h → edge-cached |
+| `/sitemap.xml` | GET | Single-URL sitemap; `Cache-Control` 24 h → edge-cached |
 | `/heatmap/<band>` | GET | Returns `[[lat, lon, strength], …]` heatmap array |
 | `/solar` | GET | Returns solar indices — DynamoDB `GetItem('current')` first, fetches if >2 h old |
 | `/solar/refresh` | POST | Forces a fresh solar fetch regardless of cache age (WB0Z-only button) |
@@ -40,6 +42,11 @@ metadata:
 - `ip_address` comes from `request.remote_addr` (Lambda WSGI adapter sets this from `event.requestContext.http.sourceIp`)
 - `access_count` uses DynamoDB `ADD` — atomic increment
 - All DynamoDB errors are caught and logged; endpoints always return `{"ok": true}` so JS fires-and-forgets
+
+### Edge-caching contract (since 2607.004)
+- CloudFront default behavior uses the managed **UseOriginCacheControlHeaders** policy (TTL 0 unless origin sends `Cache-Control`)
+- ONLY `/` (10 min), `/robots.txt`, and `/sitemap.xml` (24 h) send the header — everything else stays dynamic
+- The policy excludes query strings from the cache key — **never add `Cache-Control` to a query-varying route** (e.g. `/heatmap`)
 
 ### `/zip/<zipcode>`
 - Calls `https://api.zippopotam.us/us/{zipcode}` (free, no key needed)
