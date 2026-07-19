@@ -1,7 +1,7 @@
 # ── Lambda function ───────────────────────────────────────────────────────────
 resource "aws_lambda_function" "hf_propagation" {
   function_name = var.lambda_function_name
-  description   = "HF Propagation Map — Flask app via custom WSGI adapter"
+  description   = "A real-time HF skywave propagation visualizer for amateur radio operators. Shows estimated band openness from your QTH to every point on the globe, driven by live solar indices and a physics-based ionospheric model."
 
   filename         = var.lambda_zip_path
   source_code_hash = filebase64sha256(var.lambda_zip_path)

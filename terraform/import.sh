@@ -16,9 +16,9 @@ terraform import aws_dynamodb_table.hf_solar  hf_solar
 terraform import aws_dynamodb_table.hf_users  hf_users
 
 # IAM role + attached policies
-terraform import aws_iam_role.lambda_exec  hf-propagation-lambda-exec
-terraform import aws_iam_role_policy.lambda_dynamodb  hf-propagation-lambda-exec:hf-dynamodb-access
-terraform import aws_iam_role_policy_attachment.lambda_basic  "hf-propagation-lambda-exec/arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+terraform import aws_iam_role.lambda_exec  hf-propagation-role-x6khsb2n
+terraform import aws_iam_role_policy.lambda_dynamodb  hf-propagation-role-x6khsb2n:hf-dynamodb-local1
+terraform import aws_iam_role_policy_attachment.lambda_basic  "hf-propagation-role-x6khsb2n/arn:aws:iam::${AWS_ACCOUNT_ID}:policy/service-role/AWSLambdaBasicExecutionRole-962979a9-f854-4249-88e9-a78704bb78cd"
 
 # Lambda function
 terraform import aws_lambda_function.hf_propagation  "${LAMBDA_FUNCTION_NAME}"

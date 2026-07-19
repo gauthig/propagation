@@ -32,7 +32,7 @@ provider "aws" {
 # Queries all resources tagged app=hf_propagation across all supported services
 resource "aws_resourcegroups_group" "hf_propagation" {
   name        = "hf_propagation"
-  description = "HF Propagation Map — all app resources"
+  description = "The Propagation application - serverless lambda"
 
   resource_query {
     query = jsonencode({

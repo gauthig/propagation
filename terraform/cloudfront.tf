@@ -36,6 +36,9 @@ resource "aws_cloudfront_distribution" "hf_propagation" {
   price_class     = "PriceClass_100" # US, Canada, Europe only (cheapest)
   is_ipv6_enabled = true
 
+  # WAF web ACL created via the CloudFront console — must stay attached
+  web_acl_id = "arn:aws:wafv2:us-east-1:${data.aws_caller_identity.current.account_id}:global/webacl/CreatedByCloudFront-1b132734/d515817b-739e-4c52-92f2-a088863694b5"
+
   origin {
     origin_id   = "lambda-function-url"
     domain_name = local.lambda_origin_domain
@@ -67,7 +70,7 @@ resource "aws_cloudfront_distribution" "hf_propagation" {
   viewer_certificate {
     acm_certificate_arn      = aws_acm_certificate.wildcard.arn
     ssl_support_method       = "sni-only"
-    minimum_protocol_version = "TLSv1.2_2021"
+    minimum_protocol_version = "TLSv1.3_2025"
   }
 
   restrictions {

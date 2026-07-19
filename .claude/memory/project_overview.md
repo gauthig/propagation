@@ -50,3 +50,5 @@ Flask-based single-page web app that displays a real-time HF radio propagation h
 **How to run locally:** `.\venv\Scripts\python.exe app.py` (must use venv — system Python 3.14 has Flask/Werkzeug incompatibility). Requires boto3 in venv and valid AWS credentials.
 
 **Lambda packaging:** `pip install --platform manylinux_2_28_x86_64 --only-binary=:all: --target lambda_package flask numpy` (numpy MUST be manylinux `.so` wheels, not Windows `.pyd`), copy source + templates, `Compress-Archive` in `$env:TEMP` (OneDrive lock), copy to `lambda.zip`. Handler: `app.handler`. No Mangum — custom WSGI adapter handles Lambda Function URL payload v2.0 directly. Full script in CLAUDE.md rule 1.
+
+**Terraform state:** Live infra imported into local state (terraform/terraform.tfstate, gitignored) on 2026-07-18 via import.local.sh. IAM role keeps its console-generated name hf-propagation-role-x6khsb2n (roles can't be renamed). CloudFront has a WAF web ACL attached — declared in cloudfront.tf, must stay. Real vars live in gitignored terraform/terraform.tfvars.
