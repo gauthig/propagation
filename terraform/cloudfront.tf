@@ -33,7 +33,7 @@ resource "aws_cloudfront_distribution" "hf_propagation" {
   enabled         = true
   comment         = "HF Propagation Map — ${local.fqdn}"
   aliases         = [local.fqdn]
-  price_class     = "PriceClass_100" # US, Canada, Europe only (cheapest)
+  price_class     = "PriceClass_All" # forced: CloudFront Free pricing plan disallows selecting a price class
   is_ipv6_enabled = true
 
   # WAF web ACL created via the CloudFront console — must stay attached
