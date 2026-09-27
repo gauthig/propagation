@@ -8,8 +8,9 @@ terraform.tfstate.backup
 # Local variable values — copy terraform.tfvars.example and fill in your values
 terraform.tfvars
 
-# Plan files
+# Plan files — may embed variable values; `plan -out=tfplan` (CLAUDE.md deploy flow) has no extension
 *.tfplan
+tfplan
 
 # .terraform.lock.hcl is intentionally committed (pins provider versions like package-lock.json)
 
