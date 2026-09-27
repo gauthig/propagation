@@ -176,10 +176,20 @@ _R_EARTH      = 6371.0   # km
 _F2_HEIGHT    = 300.0    # km — nominal F2 reflection height
 _MAX_HOP_KM   = 3500.0   # longest practical single F2 hop; longer paths split into equal hops
 _MIN_ELEV_DEG = 3.0      # lowest useful takeoff angle (terrain/ground losses below this)
-_F2_LAG_H     = 1.0      # F2 ionization lags the sun ~1 h → daily foF2 peak near 13:00 local
-_NIGHT_FLOOR  = 0.33     # night-time foF2 as a fraction of the daytime peak
-_DECAY_H      = 3.0      # post-sunset F2 decay time constant (h) — ionization fades, not switches off
-_DECAY_LOOK_H = 6        # hours of look-back for that decay
+# Diurnal foF2 constants below were fitted to 16,200 GIRO ionosonde soundings (12 stations,
+# Sep 20–27 2026, SFI 101–121): mid-latitude RMSE 1.26 → 0.83 MHz, tropics 3.11 → 1.70 MHz.
+_FOF2_A       = 2.85     # daytime foF2 peak = A + B·SFI  (≈ 8.1 MHz at SFI 100, mid-latitude)
+_FOF2_B       = 0.052
+_F2_LAG_H     = 1.5      # F2 ionization lags the sun → daily foF2 peak mid-afternoon
+_F2_RISE_ELEV = -20.0    # sun elevation (deg) at which the F2 layer starts ionizing — at ~300 km it
+                         # is sunlit well before ground sunrise, so foF2 climbs from first light
+_NIGHT_FLOOR  = 0.43     # night-time foF2 as a fraction of the daytime peak
+_DECAY_H      = 2.0      # post-sunset F2 decay time constant (h) at mid-latitudes
+_EQ_BOOST     = 0.4      # equatorial-anomaly lift on the peak: ×(1 + 0.4·cos(lat)^24)
+_EQ_DECAY_H   = 6.0      # extra post-sunset decay time near the equator: +6·cos(lat)^24 h
+_POLAR_CUT    = 0.20     # high-latitude (trough/auroral) peak reduction, ramped in from 45° to 65° |lat|
+_DECAY_LOOK_H = 10       # hours of look-back for the decay
+_MUF_SIGMA    = 0.14     # day-to-day σ of ln(foF2) around the median (measured; 10–90 % = 0.85–1.18×)
 _TWILIGHT_CZ  = (-0.21, 0.05)   # sun elevation −12°…+3° → greyline band
 _GREY_MUF     = 1.15     # greyline MUF lift (ionospheric tilt along the terminator)
 _GREY_GAIN    = 1.3      # greyline strength gain (little D-layer absorption at either end)
@@ -206,13 +216,38 @@ def _cos_zenith(lat_r, lon_d, utc_h, decl, lag_h=0.0):
     return np.sin(lat_r) * np.sin(decl) + np.cos(lat_r) * np.cos(decl) * np.cos(hour_angle)
 
 
+def _equatorial(lat_r):
+    """0–1 weight that is ~1 inside ±15° of the equator and negligible beyond ~35°."""
+    return np.cos(lat_r) ** 24
+
+
 def _f2_level(lat_r, lon_d, utc_h, decl):
     """0–1 F2 ionization level from the lagged sun, decaying slowly (not instantly) after sunset."""
+    s0    = np.sin(np.radians(_F2_RISE_ELEV))
+    decay = _DECAY_H + _EQ_DECAY_H * _equatorial(lat_r)
     level = np.zeros(np.shape(lat_r))
     for tau in range(_DECAY_LOOK_H + 1):
-        cz    = np.maximum(_cos_zenith(lat_r, lon_d, utc_h - tau, decl, _F2_LAG_H), 0.0)
-        level = np.maximum(level, np.sqrt(cz) * np.exp(-tau / _DECAY_H))
+        cz    = _cos_zenith(lat_r, lon_d, utc_h - tau, decl, _F2_LAG_H)
+        lit   = np.clip((cz - s0) / (1 - s0), 0.0, None)
+        level = np.maximum(level, np.sqrt(lit) * np.exp(-tau / decay))
     return level
+
+
+def _fof2(lat_r, lon_d, utc_h, decl, sfi):
+    """Median foF2 (MHz) at a point — the fitted diurnal/latitude model."""
+    polar = np.clip((np.abs(np.degrees(lat_r)) - 45.0) / 20.0, 0.0, 1.0)
+    peak  = (_FOF2_A + _FOF2_B * sfi) * (1 + _EQ_BOOST * _equatorial(lat_r)) * (1 - _POLAR_CUT * polar)
+    return np.maximum(peak * (_NIGHT_FLOOR + (1 - _NIGHT_FLOOR) * _f2_level(lat_r, lon_d, utc_h, decl)), 1.0)
+
+
+def _p_open(ratio):
+    """Probability the band is open when freq/median-MUF = ratio, for lognormal MUF scatter _MUF_SIGMA.
+
+    Normal CDF via the tanh approximation (error < 0.002) — numpy has no erfc and scipy
+    isn't worth adding to the Lambda package for this.
+    """
+    x = -np.log(ratio) / _MUF_SIGMA
+    return 0.5 * (1 + np.tanh(0.7978845608 * (x + 0.044715 * x ** 3)))
 
 
 def _hop_geometry(hop_km):
@@ -246,7 +281,7 @@ def _vertical_factor(h_lam):
 
 def calculate_muf_map(station_lat, station_lon, freq_min, freq_max, solar_indices=None,
                       antenna_type='vertical', height_m=10.0,
-                      beam_azimuth=None, dipole_orient=0.0):
+                      beam_azimuth=None, dipole_orient=0.0, now=None):
     """
     Return list of [lat, lon, strength] (strength 0–1) for heatmap rendering.
     strength = 1 → band wide open; 0 → band closed.
@@ -265,7 +300,7 @@ def calculate_muf_map(station_lat, station_lon, freq_min, freq_max, solar_indice
     kp_penalty = max(0.0, 1.0 - (k_index / 9.0) * 0.75)
 
     freq_center = (freq_min + freq_max) / 2.0
-    now   = datetime.datetime.now(datetime.timezone.utc)
+    now   = now or datetime.datetime.now(datetime.timezone.utc)   # explicit time for validation runs
     utc_h = now.hour + now.minute / 60.0
     decl  = _solar_declination(now)
 
@@ -287,11 +322,9 @@ def calculate_muf_map(station_lat, station_lon, freq_min, freq_max, solar_indice
     elev, m_factor = _hop_geometry(dist / n_hops)
 
     # ── foF2 and D-layer absorption at each hop midpoint (great-circle path) ──
-    # Daytime foF2 peak ≈ 8.6 MHz at SFI 100, matching typical mid-latitude ionosonde
-    # values. The sun's zenith angle at each reflection point sets the diurnal, seasonal
-    # and latitude shape (lagged ~1 h for F2). The weakest hop limits the path MUF.
-    # Absorption follows the George–Bradley form ∝ cos(χ)^0.75 / (f + fH)², per hop.
-    fof2_peak = 3.0 + 0.055 * sfi
+    # foF2 follows the sun at each reflection point (_fof2, fitted to ionosonde data);
+    # the weakest hop limits the path MUF. Absorption follows the George–Bradley form
+    # ∝ cos(χ)^0.75 / (f + fH)², per hop.
     abs_coeff = 677.0 * (1 + 0.0037 * ssn) / (freq_center + _GYRO_MHZ) ** 2
     fof2      = np.full(dist.shape, np.inf)
     loss_db   = np.zeros(dist.shape)
@@ -299,8 +332,7 @@ def calculate_muf_map(station_lat, station_lon, freq_min, freq_max, solar_indice
         active     = i < n_hops
         frac       = np.minimum((2 * i + 1) / (2.0 * n_hops), 1.0)
         mlat, mlon = _gc_point(la1, lo1, la2, lo2, delta, frac)
-        f2_level   = _f2_level(mlat, mlon, utc_h, decl)
-        hop_fof2   = np.maximum(fof2_peak * (_NIGHT_FLOOR + (1 - _NIGHT_FLOOR) * f2_level), 1.0)
+        hop_fof2   = _fof2(mlat, mlon, utc_h, decl, sfi)
         fof2       = np.where(active, np.minimum(fof2, hop_fof2), fof2)
         cz_d       = np.maximum(_cos_zenith(mlat, mlon, utc_h, decl), 0.0)
         loss_db   += np.where(active, abs_coeff * cz_d ** 0.75 * m_factor, 0.0)
@@ -315,13 +347,12 @@ def calculate_muf_map(station_lat, station_lon, freq_min, freq_max, solar_indice
     muf   = fof2 * m_factor * np.where(grey, _GREY_MUF, 1.0)
     ratio = freq_center / muf
 
-    # ── Strength curve (see model notes) ──────────────────────────────────────
-    #   ≤1.00 → supported; 1.00–1.35 → above median MUF, falling (day-to-day foF2
-    #   spread); >1.35 → closed. How far *below* the MUF says nothing about signal
-    #   level — low-band daytime loss comes from the absorption term instead.
-    #   Clip the power base ≥0 so the inactive branch never yields NaN.
-    above    = np.power(np.clip((1.35 - ratio) / 0.35, 0, None), 0.7)
-    strength = np.select([ratio > 1.35, ratio > 1.0], [0.0, above], default=1.0)
+    # ── Strength = probability the path's MUF exceeds the band today ─────────
+    #   The model gives the *median* MUF; real foF2 scatters day to day (σ measured
+    #   from ionosondes). At the median MUF the band is open half the time, at 1.2×
+    #   ~10 %. How far *below* the MUF says nothing about signal level — low-band
+    #   daytime loss comes from the absorption term instead.
+    strength = _p_open(ratio)
     strength = strength * 10 ** (-loss_db / _ABS_SCALE_DB) * np.where(grey, _GREY_GAIN, 1.0)
     strength = np.clip(strength * kp_penalty, 0.0, 1.0)
 

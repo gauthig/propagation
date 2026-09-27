@@ -688,11 +688,12 @@
     <div class="help-section">
       <h3>Propagation Model</h3>
       <ul>
-        <li><b>foF2</b> (critical frequency) is estimated from SFI and the sun's elevation at each reflection point — so time of day, season, and latitude all count — with the F2 layer lagging the sun by about an hour. Calibrated to typical mid-latitude ionosonde values (~8.5 MHz at midday, SFI 100).</li>
+        <li><b>foF2</b> (critical frequency) is estimated from SFI and the sun's elevation at each reflection point — so time of day, season, and latitude all count — with the F2 layer lagging the sun, starting to ionize before ground sunrise, boosted near the equator and reduced at high latitudes. Its constants were fitted to 16,200 real ionosonde soundings from 12 stations worldwide (typical error under 1 MHz at mid-latitudes).</li>
         <li><b>MUF</b> = foF2 × M-factor, where the M-factor comes from curved-earth hop geometry: ~1 for short hops, rising to ~3.4 for a 3,500 km hop. Longer paths are split into equal hops.</li>
         <li>Multi-hop paths are evaluated at each reflection point along the great-circle path; the <b>weakest hop</b> limits the path MUF.</li>
-        <li>The nominal MUF is a <b>median estimate</b> — the band is open ~50 % of the time at exactly that frequency. The strength curve extends 35 % above the MUF to model natural foF2 variability.</li>
-        <li>After sunset the F2 layer <b>fades gradually</b> (about a 3-hour time constant) rather than switching off, so bands like 20m stay open into the evening toward the Pacific.</li>
+        <li>The MUF is a <b>median estimate</b>; the real ionosphere varies about ±14 % day to day (measured). Strength is the <b>probability the band is open</b> on the path today: 50 % at the median MUF, ~10 % at 1.2× the MUF, ~95 % at 0.8×.</li>
+        <li>After sunset the F2 layer <b>fades gradually</b> (about 2 hours at mid-latitudes, much longer near the equator) rather than switching off, so bands like 20m stay open into the evening toward the Pacific.</li>
+        <li>Checked against a week of real 20m WSPR reception from Southern California: paths the map colors were heard about 5–10× more often than paths it leaves dark. Known weakness: polar routes (e.g. the US West Coast to Europe) are shown more open than observed, because auroral absorption isn't modeled.</li>
         <li><b>Greyline:</b> when both your QTH and the far end are in twilight, the path gets a modest boost — less absorption and a slightly higher MUF along the terminator. Tick <b>Show greyline</b> to see the twilight band (violet), the terminator (dashed line) and the point where the sun is overhead (yellow dot). When your QTH is inside the band, the far parts of the band are your greyline paths.</li>
         <li><b>D-layer absorption</b> weakens each hop in daylight — strongest at low frequencies and high sun. This is why 80m/40m fade over long daytime paths while 20m stays open.</li>
         <li>Geomagnetic activity (K-index) applies a uniform penalty to all paths.</li>
@@ -726,7 +727,7 @@
         <li><b style="color:#ff9000">Orange</b> — Marginal. Near the MUF edge or weakened by absorption. Noisy but workable.</li>
         <li><b style="color:#ffd000">Yellow</b> — Good probability.</li>
         <li><b style="color:#8cff14">Lime / Green</b> — Prime operating range. The ionosphere supports the path with little absorption.</li>
-        <li>No color — Band closed at that path (ionosphere cannot support propagation).</li>
+        <li>No color — Band closed on that path, or open on fewer than about 1 day in 8 (strength below 0.12).</li>
       </ul>
     </div>
 
@@ -1381,14 +1382,22 @@ function estimateFoF2(lat, lon, sfi) {
   const utcH = now.getUTCHours() + now.getUTCMinutes() / 60;
   const doy  = Math.floor((now - Date.UTC(now.getUTCFullYear(), 0, 0)) / 86400000);
   const decl = -23.44 * Math.cos(2 * Math.PI / 365 * (doy + 10)) * rad;
-  // F2 lags the sun 1 h and decays with a 3 h time constant after sunset (6 h look-back)
+  // F2 lags the sun 1.5 h, starts ionizing at sun −20°, decays 2 h (+6 h near the
+  // equator) after sunset, with a 10 h look-back, an equatorial-anomaly lift and a
+  // high-latitude reduction
+  const eq    = Math.pow(Math.cos(lat * rad), 24);
+  const s0    = Math.sin(-20 * rad);
+  const decay = 2 + 6 * eq;
   let level = 0;
-  for (let tau = 0; tau <= 6; tau++) {
-    const ha = ((((utcH - tau + lon / 15 - 1) % 24) + 24) % 24 - 12) * 15 * rad;
-    const cz = Math.sin(lat * rad) * Math.sin(decl) + Math.cos(lat * rad) * Math.cos(decl) * Math.cos(ha);
-    level = Math.max(level, Math.sqrt(Math.max(cz, 0)) * Math.exp(-tau / 3));
+  for (let tau = 0; tau <= 10; tau++) {
+    const ha  = ((((utcH - tau + lon / 15 - 1.5) % 24) + 24) % 24 - 12) * 15 * rad;
+    const cz  = Math.sin(lat * rad) * Math.sin(decl) + Math.cos(lat * rad) * Math.cos(decl) * Math.cos(ha);
+    const lit = Math.max((cz - s0) / (1 - s0), 0);
+    level = Math.max(level, Math.sqrt(lit) * Math.exp(-tau / decay));
   }
-  return Math.max(1.0, (3.0 + 0.055 * sfi) * (0.33 + 0.67 * level));
+  const polar = Math.min(Math.max((Math.abs(lat) - 45) / 20, 0), 1);
+  const peak  = (2.85 + 0.052 * sfi) * (1 + 0.4 * eq) * (1 - 0.2 * polar);
+  return Math.max(1.0, peak * (0.43 + 0.57 * level));
 }
 
 // Curved-earth MUF M-factor for one F2 hop (300 km layer, 3° minimum takeoff angle)
@@ -1463,7 +1472,8 @@ let _offCanvas = null;
 
 function drawHeatCanvas() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  if (!heatData.length) return;
+  // A page opened in a background tab can start at 0×0; onResize redraws once it has a size
+  if (!heatData.length || !canvas.width || !canvas.height) return;
 
   // Draw onto an offscreen canvas first so we can cap per-pixel alpha.
   // Without capping, overlapping blobs accumulate toward fully opaque and
@@ -1477,14 +1487,19 @@ function drawHeatCanvas() {
   offCtx.clearRect(0, 0, _offCanvas.width, _offCanvas.height);
 
   for (const [lat, lon, strength] of heatData) {
+    // WSPR check (Sep 2026): paths below ~0.12 were heard barely more often than dark ones,
+    // and ~9 overlapping blobs per pixel would stack even faint ones into a full wash.
+    if (strength < 0.12) continue;
     const pt = projection([lon, lat]);
     if (!pt) continue;
     const [x, y] = pt;
     if (x<-50||x>canvas.width+50||y<-50||y>canvas.height+50) continue;
     const [r,g,b] = heatColor(strength);
-    // Per-blob alpha: weak signals are faint (0.25), strong signals solid (0.55).
-    // The alpha cap below prevents dense areas from going fully opaque.
-    offCtx.fillStyle = `rgba(${r},${g},${b},${0.25 + strength * 0.30})`;
+    // Per-blob alpha: 0.25 at strength 0.2 rising to 0.55 at 1.0; the alpha cap below
+    // prevents dense areas from going fully opaque.
+    // 0.12–0.35 fades in: WSPR hearing rate jumps from ~7 % to ~29 % across that range
+    const alpha = (0.25 + strength * 0.30) * Math.min(1, (strength - 0.12) / 0.23);
+    offCtx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
     offCtx.beginPath();
     offCtx.arc(x, y, HEAT_RADIUS, 0, 2*Math.PI);
     offCtx.fill();

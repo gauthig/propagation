@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 67f4cc15-833d-49d0-982f-a2dd3f24bb7c
-  modified: 2026-09-27T15:20:25.621Z
+  modified: 2026-09-27T15:47:35.890Z
 ---
 
 ## Ionospheric model (`propagation.py` → `calculate_muf_map`)
@@ -25,15 +25,17 @@ after 20m showed no US coverage during the day; the old model's foF2 was ~half o
   takeoff angle (also used by the antenna elevation pattern) and M-factor
   (~1.0 short hops → ~3.37 at 3,500 km)
 
-**foF2 at each hop midpoint:**
+**foF2 at each hop midpoint (`_fof2`, 2609.003 — fitted to ionosondes, see below):**
 ```
-peak  = 3.0 + 0.055 * SFI                     # ~8.6 MHz at SFI 100 (mid-lat ionosonde typical)
-cz(t) = cos(solar zenith) at midpoint, sun lagged 1 h (_F2_LAG_H) → peak ≈ 13:00 local
-level = max over tau=0..6 h of sqrt(max(cz(t-tau), 0)) * exp(-tau/3)   # _f2_level: slow post-sunset decay
-foF2  = max(peak * (0.33 + 0.67 * level), 1.0)                         # _NIGHT_FLOOR = 0.33
+eq    = cos(lat)^24                              # _equatorial: ~1 inside ±15°, ~0 beyond 35°
+polar = clip((|lat| - 45) / 20, 0, 1)
+peak  = (2.85 + 0.052*SFI) * (1 + 0.4*eq) * (1 - 0.2*polar)
+cz(t) = cos(solar zenith) at midpoint, sun lagged 1.5 h (_F2_LAG_H)
+lit   = clip((cz - sin(-20°)) / (1 - sin(-20°)), 0)   # _F2_RISE_ELEV: F2 lit before ground sunrise
+level = max over tau=0..10 h of sqrt(lit(t-tau)) * exp(-tau / (2 + 6*eq))
+foF2  = max(peak * (0.43 + 0.57*level), 1.0)          # _NIGHT_FLOOR = 0.43
 ```
-(2609.002) The decay term replaced a plain sqrt(cz): before it, 20m closed everywhere
-between 20:00 and 22:00 PDT; now Pacific paths fade out around midnight.
+History: 2609.001 sqrt(cz) only (20m closed 20–22 PDT); 2609.002 added 3 h decay/floor 0.33.
 
 **Greyline (2609.002):** if the QTH and the cell are both in twilight (sun elevation
 −12°…+3°, `_TWILIGHT_CZ`) and both within ±60° lat (`_GREY_MAX_LAT` — polar regions sit in
@@ -47,15 +49,43 @@ Path MUF = min over hops of foF2 × M. Time uses UTC hour+minute.
 `loss_dB = 677·(1+0.0037·SSN)·cos(χ)^0.75 / (f+1.4)² · M` (χ unlagged) →
 strength × 10^(−loss/40). This is what fades 80m/40m on long daytime paths.
 
-**Strength:** ratio = f/MUF → ≤1.0 → 1.0; 1.0–1.35 → `((1.35-r)/0.35)^0.7`; >1.35 → 0.
-No below-MUF penalty any more (old 0.45–0.85 "below FOT" branch removed — it made
-good low-ratio paths look weak). Then × absorption × `kp_penalty = max(0, 1-(K/9)·0.75)`
-× antenna factor; cells ≤ 0.03 dropped.
+**Strength (2609.003):** `_p_open(r)` = Φ(−ln(f/MUF)/0.14) (tanh approximation of the
+normal CDF — no scipy in Lambda): probability the band is open today given lognormal
+day-to-day MUF scatter. Replaced the ad-hoc tail (≤1→1.0, 1–1.35 falling), which
+overstated openness 2–5× and was the real cause of the old night-side "red wash".
+Then × absorption × `kp_penalty` × greyline gain × antenna; server drops cells ≤ 0.03.
+Frontend `drawHeatCanvas` skips < 0.12 and fades 0.12–0.35: ~9 blobs overlap per pixel,
+so any per-blob alpha scale alone saturates the alpha cap and still washes the map.
+`calculate_muf_map(..., now=None)` accepts an explicit time for validation runs.
 
-**Tuning notes (2026-09-27):** night floor 0.38 painted faint red over the whole
-night side on 20m; 0.30 killed 40m night short paths; 0.33 chosen. Constants were
-calibrated against typical band behavior, not ionosonde data — validating against
-Point Arguello (GIRO) or VOACAP is an open follow-up.
+**Ionosonde validation + fit (2026-09-27, applied in 2609.003):** 16,200 GIRO
+soundings, 12 stations, Sep 20–27 2026, SFI 101–121 (equinox, one week only).
+- Data: GIRO DIDBGetValues/ShowIonogramPage return 404 (Point Arguello PA836 has Sep 2026
+  soundings listed but not servable; KC2G's PA836 feed stale since 2024-08). Working source:
+  KC2G `https://prop.kc2g.com/api/stations.json` (latest per station, numeric `id`) and
+  `https://prop.kc2g.com/api/history.json?station=<id>&days=7` → rows [time, cs, foF2, MUFD, hmF2].
+  Daily SFI: NOAA `services.swpc.noaa.gov/json/f107_cm_flux.json` ("Noon" rows).
+- Mid-lat daytime foF2 (08–16 LT) accurate: bias −0.27/−0.01 MHz. M(3000) fine: obs median 3.19 vs model 3.28.
+- Mid-lat misses: dawn −1.7 MHz (rise too late), evening −1.2, night −0.8 (floor too low). RMSE 1.26.
+- Tropics (<25°) −1.7 to −3.8 MHz (no equatorial anomaly / slow post-sunset decay). RMSE 3.11.
+- Grid fit: scale 0.95 on peak, floor 0.43, lag 1.5 h, decay 2 h, F2 lit from sun −20°
+  (layer sunlit before ground sunrise), equatorial boost 0.4·cos(lat)^24 on peak and +6 h decay
+  → mid-lat RMSE 0.83 with ~0 bias every LT bin; tropics RMSE 1.70 (evening still −0.8..−1.1).
+- Polar taper added after the fit: Gakona +1.38 → +0.27 MHz, Juliusruh +0.38 → −0.18 (cut 0.20 best).
+- As applied: every station within ±0.7 MHz mean bias; MUF(3000) bias +0.1 MHz, RMSE 5.6 → 3.7.
+- Day-to-day scatter σ(ln foF2) = 0.139 (10–90%: 0.85–1.18×, matches ITU deciles) → _MUF_SIGMA 0.14.
+- VOACAP not run: needs installing ITS HF (Windows) or voacapl — user permission required.
+
+**WSPR validation (2026-09-27):** wspr.live public ClickHouse (`https://db1.wspr.live/?query=`,
+table `wspr.rx`, band=14). Unit = (hour, receiver active on 20m that hour, ≥300 km from DM14);
+label = heard any SoCal tx (`tx_loc` matching `^DM[01][234]`). 106,411 receiver-hours, 14.3% heard.
+- AUC 0.799 (2609.002) → 0.828 (2609.003); heard paths shown dark 16.1% → 4.6%.
+- Fitted reliability by strength: ≤0.03 2.8% heard, 0.03–0.15 4.0%, 0.15–0.35 6.8%, 0.35–0.6 28.6%,
+  ≥0.6 56% (monotonic; the old model's middle bins were not).
+- Biggest fix: 03–06 PDT East Coast (their sunrise) — 24% heard; old model 0.00, new 0.21.
+- Europe over-predicted by BOTH models: 06–15 PDT mean strength ~0.3 but <1% of 44k European
+  receiver-hours heard SoCal (polar route; auroral absorption not modeled). Asia: too few
+  hearings (~19) to judge. Real morning (06–09 PDT) Oceania opening confirmed (7.9% heard).
 
 **Skip circle (frontend `estimateSkipKm` in index.html):** mirrors the server math
 (`estimateFoF2`, `hopMFactor` — constants must stay in sync). For 24 bearings finds

@@ -246,16 +246,15 @@ Implemented in `propagation.py` with numpy-vectorized grid math; solar data is f
 
 **Path geometry** — paths are split into equal hops of at most 3,500 km, with reflection points at the true great-circle hop midpoints.
 
-**foF2** — daytime peak `3.0 + 0.055×SFI` (~8.6 MHz at SFI 100, typical of mid-latitude ionosondes), shaped by the solar zenith angle at each reflection point, so time of day, season and latitude all count. The F2 layer lags the sun by 1 h, fades after sunset with a 3 h time constant rather than switching off, and has a night-time floor of 33% of the peak.
+**foF2** — daytime peak `2.85 + 0.052×SFI` (~8.1 MHz at SFI 100 at mid-latitudes), shaped by the solar zenith angle at each reflection point, so time of day, season and latitude all count. The layer starts ionizing when the sun is 20° below the horizon (at ~300 km it is sunlit before ground sunrise), lags the sun by 1.5 h, and fades after sunset with a 2 h time constant down to a night floor of 43% of the peak. Near the equator the peak is up to 40% higher and the evening fade 6 h slower (equatorial anomaly); above 45° latitude the peak tapers down by up to 20% (trough/auroral zone).
+
+**Calibration and validation (Sep 2026)** — the foF2 constants were fitted to 16,200 GIRO ionosonde soundings (12 stations, one week, SFI 101–121) via [KC2G's API](https://prop.kc2g.com/stations/): mid-latitude RMSE 1.26 → 0.83 MHz with no time-of-day bias, tropics 3.11 → 1.70 MHz, MUF(3000) bias +0.1 MHz. The whole map was then scored against a week of 20m WSPR reception from Southern California (106,000 receiver-hours from [wspr.live](https://wspr.live)): ranking AUC 0.80 → 0.83, and heard paths shown dark 16% → 5%. Known weakness: polar routes (US West Coast ↔ Europe) are shown more open than observed, because auroral absorption isn't modeled.
 
 **Greyline** — when both ends of a path are in twilight (sun −12° to +3°, within ±60° latitude), the MUF is raised 15% and strength by 30%, a heuristic for the low absorption and terminator tilt of greyline paths.
 
 **MUF** — `foF2 × M-factor`, where the M-factor comes from curved-earth hop geometry (300 km layer, 3° minimum takeoff): ~1 for short hops, ~3.4 for a 3,500 km hop. The weakest hop limits the path.
 
-**Strength curve** — probabilistic rather than a hard cutoff:
-- `≤ 1.0×MUF` → 1.0 (path supported)
-- `1.0–1.35×MUF` → falling (above the median MUF; day-to-day variability)
-- `> 1.35×MUF` → 0 (closed)
+**Strength** — the probability the band is open on the path today: the MUF is a median, and measured day-to-day foF2 scatter is lognormal with σ ≈ 0.14, so strength = `Φ(−ln(f/MUF) / 0.14)` (0.95 at 0.8×MUF, 0.5 at the MUF, ~0.1 at 1.2×). The map hides strengths below 0.12 and fades in 0.12–0.35, where WSPR hearing rates jump from ~7% to ~29%.
 
 **D-layer absorption** — per hop, `677·(1+0.0037·SSN)·cos(χ)^0.75 / (f+1.4)² · M` dB (George–Bradley form), applied as `strength × 10^(−dB/40)`. This is why 80m/40m fade on long daytime paths while 20m stays open.
 
