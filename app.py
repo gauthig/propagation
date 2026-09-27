@@ -13,7 +13,8 @@ import os
 from collections import OrderedDict
 from decimal import Decimal
 from io import BytesIO
-from propagation import calculate_muf_map, get_solar_indices, http_get, _NET_ERRORS, EGP_SOILS
+from propagation import (calculate_muf_map, get_solar_indices, http_get, _NET_ERRORS, SOILS,
+                         antenna_gain_db)
 
 import boto3
 
@@ -28,7 +29,7 @@ log = logging.getLogger('hf')
 # ── Configuration ──────────────────────────────────────────────────────────────
 # Version format YYMM.### — ### increments every build and resets to 001 at the
 # start of each month (see CLAUDE.md packaging rule).
-APP_VERSION = '2609.007'
+APP_VERSION = '2609.008'
 SITE_URL    = 'https://propagation.ggcloud.us'  # canonical origin — used by robots.txt / sitemap.xml
 
 DEFAULT_LAT = 39.8
@@ -404,6 +405,7 @@ _ROBOTS_TXT = (
     'Disallow: /track/\n'
     'Disallow: /solar\n'
     'Disallow: /heatmap/\n'
+    'Disallow: /antenna/\n'
     'Disallow: /zip/\n'
     '\n'
     'Sitemap: ' + SITE_URL + '/sitemap.xml\n'
@@ -770,17 +772,28 @@ def heatmap(band):
     except (TypeError, ValueError):
         req_lat, req_lon = DEFAULT_LAT, DEFAULT_LON
 
+    with _lock:
+        solar = _cache['solar']
+    if solar is None:
+        solar = _get_solar_db() or _fetch_and_cache_solar()
+        _update_solar_cache(solar)
+
+    data = _compute_heatmap(band, req_lat, req_lon, solar, **_antenna_args())
+    return jsonify(data)
+
+
+def _antenna_args():
+    """Antenna query parameters shared by /heatmap and /antenna, validated with safe defaults."""
     antenna_type = request.args.get('antenna', 'vertical')
     if antenna_type not in ('vertical', 'dipole', 'hex_beam', 'egp_zf80'):
         antenna_type = 'vertical'
     soil = request.args.get('soil', 'average')
-    if soil not in EGP_SOILS:
+    if soil not in SOILS:
         soil = 'average'
     try:
         height_ft = float(request.args.get('height_ft', 30))
     except (TypeError, ValueError):
         height_ft = 30.0
-    height_m = height_ft * 0.3048
 
     beam_azimuth = None
     if antenna_type == 'hex_beam' and 'azimuth' in request.args:
@@ -794,16 +807,24 @@ def heatmap(band):
     except (TypeError, ValueError):
         dipole_orient = 0.0
 
-    with _lock:
-        solar = _cache['solar']
-    if solar is None:
-        solar = _get_solar_db() or _fetch_and_cache_solar()
-        _update_solar_cache(solar)
+    return {'antenna_type': antenna_type, 'height_m': height_ft * 0.3048, 'soil': soil,
+            'beam_azimuth': beam_azimuth, 'dipole_orient': dipole_orient}
 
-    data = _compute_heatmap(band, req_lat, req_lon, solar,
-                            antenna_type=antenna_type, height_m=height_m,
-                            beam_azimuth=beam_azimuth, dipole_orient=dipole_orient, soil=soil)
-    return jsonify(data)
+
+@app.route('/antenna/<band>')
+def antenna_info(band):
+    """dB the map applies for the chosen antenna vs the reference, at sample takeoff angles."""
+    if band not in BAND_FREQS:
+        return jsonify({'error': f'Invalid band. Valid: {list(BAND_FREQS.keys())}'}), 400
+    a = _antenna_args()
+    label, er, sigma, examples = SOILS[a['soil']]
+    return jsonify({
+        'antenna': a['antenna_type'],
+        'soil': {'key': a['soil'], 'label': label, 'sigma': sigma, 'er': er, 'examples': examples},
+        'gains': antenna_gain_db(*BAND_FREQS[band], a['antenna_type'], a['height_m'], a['soil'],
+                                 a['beam_azimuth'], a['dipole_orient']),
+        'reference': 'λ/4 vertical with good radials over average soil',
+    })
 
 
 # ── ZIP geocoding ──────────────────────────────────────────────────────────────

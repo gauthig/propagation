@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 67f4cc15-833d-49d0-982f-a2dd3f24bb7c
-  modified: 2026-09-27T17:19:58.375Z
+  modified: 2026-09-27T17:50:18.061Z
 ---
 
 ## Ionospheric model (`propagation.py` → `calculate_muf_map`)
@@ -122,6 +122,15 @@ Applied multiplicatively after absorption and kp_penalty. Normalized so λ/4 ver
 - True bearing station → cell computed inline (vectorized)
 - Takeoff angle = `elev` from `_hop_geometry` (curved earth, per-hop, min 3°)
 - `_EL_NORM = 0.394` — normalization so dipole at 0.5λ broadside gives factor ≈ 1.30
+
+**All antennas (2609.008): one fixed reference.** `_antenna_factor()` returns a power ratio vs a λ/4
+vertical (10 Ω radials) over AVERAGE soil at the cell's takeoff angle. Soils in `SOILS` (very_poor
+3/0.001, poor 10/0.002, average 13/0.005, good 20/0.0303, salt_water 81/5). Vertical = table
+`antennas/vertical_lambda4.json` (G(soil)−G(avg)); Zero Five table delta already vs avg reference;
+dipole/hex el_factor = |1+Γh·e^{-j4πh/λ·sinψ}|/2 / _EL_NORM (_EL_NORM computed so 0.5λ, broadside, 20°,
+avg soil → 1.30 — the old heuristic calibration, kept; real NEC gain is an open "advanced" item).
+Pre-2609.008 dipole formula sin(π·h/λ·sinψ) was a half-height bug. `antenna_gain_db()` +
+`/antenna/<band>` feed the top-center readout. @10°: vertical very_poor −3.4 … salt +7.5 dB.
 
 **Vertical (2609.007+):** a resonant λ/4 cut for the selected band with a good radial field (~10 Ω) —
 the reference, factor exactly 1.0 on every band, no height input (user decision 2026-09-27: "true

@@ -39,7 +39,11 @@ Dark glass-morphism panel (top-left, fixed, scrollable, max-height 100vh).
    - Height — hidden for Vertical. `setHeightOptions()` swaps the list: 10–100 ft ("Height from
      Ground") for dipole/hex, 4–12 ft ("Base Height", default 8) for the elevated GP; each list's
      last value is remembered separately (`hf_antenna.height` / `.height_egp`)
-   - Soil (poor/average/good, `#ant-soil`) — shown only for the elevated GP; sent as `&soil=`
+   - Soil (`#ant-soil`, 5 choices with S/m in the label) — shown for every antenna type since
+     2609.008, sent as `&soil=` whenever "Use antenna" is ticked
+   - Top-center `#antenna-readout` (own line under the band name): antenna · height · soil ·
+     dB @10°/20° from `/antenna/<band>` (`updateAntennaReadout`, sequence-guarded); unticked shows
+     "No antenna model — reference". Band plan `#band-plan-container` starts `bp-collapsed` (hidden).
    - Hex Beam: azimuth input (applies 400 ms after typing stops); error shown if band is 80m/60m/40m
    - Dipole: wire orientation select (N-S, NE-SW, E-W, NW-SE)
 

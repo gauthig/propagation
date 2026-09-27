@@ -110,12 +110,16 @@ Check **Use antenna** to apply antenna pattern to the heatmap. Unchecked = basel
 
 | Antenna | Description |
 |---|---|
-| **Vertical** | The reference: a resonant λ/4 vertical cut for the selected band, with a good radial field (≈32 on-ground radials, ~10 Ω loss). Omnidirectional, no height setting; same as leaving "Use antenna" unticked. |
-| **Dipole** | Figure-8 pattern. Signal radiates broadside (90° to wire). |
+| **Vertical** | A resonant λ/4 vertical cut for the selected band, with a good radial field (≈32 on-ground radials, ~10 Ω loss). Omnidirectional, no height setting. Over average soil it is the 0 dB reference, the same as leaving "Use antenna" unticked. |
+| **Dipole** | Figure-8 pattern. Signal radiates broadside (90° to wire). Elevation lobes follow the height through the ground reflection (fixed in 2609.008: the model previously treated every dipole as half its height). |
 | **Hex Beam** | ~60° beamwidth, ~6 dBd gain, ~19 dB F/B. 20m–10m only. |
 | **Elevated GP (Zero Five 10–80m)** | 43 ft radiator with six 130" elevated radials, base 4–12 ft, 4:1 UnUn and 100 ft RG-213 to a shack tuner. Modeled in NEC2++ against the baseline vertical at every takeoff angle, for the chosen **Soil** (poor/average/good). About −7 dB on 80m (coax loss at high SWR), about −2 dB on 60m, even to +5 dB on 40m–17m, and high-angle lobes on 12m–10m. See [`tools/antenna/`](tools/antenna/README.md). |
 
 Heights: 10–100 ft for dipole/hex beam (antenna height), 4–12 ft for the elevated GP (base/radial height). Settings are remembered in the browser.
+
+**Soil** applies to every antenna: very poor (0.001 S/m, city), poor (0.002, desert), average (0.005, clay), good (0.03, farmland) and salt water (5 S/m). Every antenna factor is measured against one fixed reference, a λ/4 vertical with good radials over **average** soil (`antennas/vertical_lambda4.json`, from `tools/antenna/ground_reference.py`). So poor ground makes every antenna worse, not just relatively better or worse than a vertical. Verticals are strongly soil-dependent: a λ/4 at 10° takeoff runs from about −3 dB on very poor ground to +7 dB at the shoreline. Horizontal dipoles and beams use the real ground reflection for horizontal polarization and change by only tenths of a dB.
+
+The line under the band name at the top of the map shows the antenna, height, soil and the dB the map applies at 10° and 20° takeoff (in the antenna's best direction) against that reference. The band plan starts hidden; ☰ shows it.
 
 ### Solar indices panel
 
