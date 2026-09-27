@@ -195,6 +195,16 @@ _GREY_MUF     = 1.15     # greyline MUF lift (ionospheric tilt along the termina
 _GREY_GAIN    = 1.3      # greyline strength gain (little D-layer absorption at either end)
 _GREY_MAX_LAT = 60.0     # polar regions sit in twilight for days near equinox — not a greyline
 _GYRO_MHZ     = 1.4      # electron gyrofrequency term in the D-layer absorption formula
+_MAG_POLE     = (80.8, -72.7)   # geomagnetic (dipole) north pole, deg — over the Canadian Arctic
+# Auroral constants tuned on a week of 20m WSPR from SoCal (train 4 days / test 3 days):
+# held-out AUC 0.814 → 0.859; US West Coast → Europe mean strength 0.17 → 0.01 (0.2 % heard).
+_AUR_LAT0     = 72.0     # auroral-absorption zone centre, geomagnetic |lat| at Kp 0 …
+_AUR_KP_SHIFT = 2.0      # … moving equatorward this many degrees per Kp unit (68° at Kp 2)
+_AUR_WIDTH    = 4.0      # Gaussian half-width of the zone (deg)
+_AUR_DB       = 20.0     # loss per D-layer crossing at the zone centre, at 20m …
+_AUR_FREQ_EXP = 0.5      # … scaled by (f20/f)^0.5. 40m WSPR preferred this over pure-absorption
+                         # (f20/f)^2 (held-out AUC 0.883 → 0.887; EU heard-but-dark 69 % → 21 %) —
+                         # the term also stands in for less frequency-dependent auroral scatter
 _ABS_SCALE_DB = 40.0     # absorption dB that cuts strength by 10× (strength ∝ 10^(-dB/40))
 
 # Static 3° grid — fine enough for smooth heatmap rendering. Built once and reused
@@ -248,6 +258,19 @@ def _p_open(ratio):
     """
     x = -np.log(ratio) / _MUF_SIGMA
     return 0.5 * (1 + np.tanh(0.7978845608 * (x + 0.044715 * x ** 3)))
+
+
+def _mag_lat(lat_r, lon_d):
+    """Geomagnetic (centred-dipole) latitude in degrees."""
+    pla, plo = np.radians(_MAG_POLE[0]), np.radians(_MAG_POLE[1])
+    s = np.sin(lat_r) * np.sin(pla) + np.cos(lat_r) * np.cos(pla) * np.cos(np.radians(lon_d) - plo)
+    return np.degrees(np.arcsin(np.clip(s, -1.0, 1.0)))
+
+
+def _auroral_weight(lat_r, lon_d, k_index):
+    """0–1 closeness to the auroral-absorption zone, which widens and moves equatorward with Kp."""
+    centre = _AUR_LAT0 - _AUR_KP_SHIFT * k_index
+    return np.exp(-0.5 * ((np.abs(_mag_lat(lat_r, lon_d)) - centre) / _AUR_WIDTH) ** 2)
 
 
 def _hop_geometry(hop_km):
@@ -336,6 +359,18 @@ def calculate_muf_map(station_lat, station_lon, freq_min, freq_max, solar_indice
         fof2       = np.where(active, np.minimum(fof2, hop_fof2), fof2)
         cz_d       = np.maximum(_cos_zenith(mlat, mlon, utc_h, decl), 0.0)
         loss_db   += np.where(active, abs_coeff * cz_d ** 0.75 * m_factor, 0.0)
+
+    # ── Auroral absorption at each hop's ground points (D-layer crossings) ────
+    # Paths through the auroral zone lose signal that sun-driven D-layer absorption
+    # misses — e.g. US West Coast ↔ Europe crosses it over Hudson Bay/Greenland.
+    # Interior ground points are crossed twice (down, then up); the path ends once.
+    if _AUR_DB > 0:
+        aur_db = _AUR_DB * ((14.175 + _GYRO_MHZ) / (freq_center + _GYRO_MHZ)) ** _AUR_FREQ_EXP
+        for k in range(int(n_hops.max()) + 1):
+            on_path    = k <= n_hops
+            glat, glon = _gc_point(la1, lo1, la2, lo2, delta, np.minimum(k / n_hops, 1.0))
+            crossings  = np.where((k == 0) | (k == n_hops), 1.0, 2.0)
+            loss_db   += np.where(on_path, aur_db * crossings * _auroral_weight(glat, glon, k_index), 0.0)
 
     # ── Greyline: both ends in twilight → higher MUF, little absorption ───────
     tw_lo, tw_hi = _TWILIGHT_CZ

@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 67f4cc15-833d-49d0-982f-a2dd3f24bb7c
-  modified: 2026-09-27T15:47:35.890Z
+  modified: 2026-09-27T16:01:36.116Z
 ---
 
 ## Ionospheric model (`propagation.py` → `calculate_muf_map`)
@@ -45,6 +45,13 @@ dusk terminator (Middle East / Indian Ocean) at sunrise.
 Declination from day-of-year, so season/latitude come from the zenith angle (no separate lat factor).
 Path MUF = min over hops of foF2 × M. Time uses UTC hour+minute.
 
+**Auroral absorption (2609.004):** at each hop ground point k/n (interior points ×2 crossings,
+path ends ×1): `_AUR_DB · (f20/f)^0.5 · exp(−½((|maglat| − (72 − 2·Kp))/4)²)` added to loss_db.
+`_mag_lat` = centred dipole, pole 80.8N 72.7W (Hudson Bay/S Greenland/Iceland ≈ 69°, London 53°,
+DM14 41°, Anchorage 62°). Tuned on 20m WSPR (train Sep 20–24 12Z / test after): held-out AUC
+0.814→0.859; 40m check 0.789→0.887. Freq exponent 0.5 chosen from 40m data over physical 2.
+Scripts: fit_aur.py / fit_aur40.py pattern (wspr.live, band=14 / band=7).
+
 **D-layer absorption (per hop, summed):**
 `loss_dB = 677·(1+0.0037·SSN)·cos(χ)^0.75 / (f+1.4)² · M` (χ unlagged) →
 strength × 10^(−loss/40). This is what fades 80m/40m on long daytime paths.
@@ -83,9 +90,9 @@ label = heard any SoCal tx (`tx_loc` matching `^DM[01][234]`). 106,411 receiver-
 - Fitted reliability by strength: ≤0.03 2.8% heard, 0.03–0.15 4.0%, 0.15–0.35 6.8%, 0.35–0.6 28.6%,
   ≥0.6 56% (monotonic; the old model's middle bins were not).
 - Biggest fix: 03–06 PDT East Coast (their sunrise) — 24% heard; old model 0.00, new 0.21.
-- Europe over-predicted by BOTH models: 06–15 PDT mean strength ~0.3 but <1% of 44k European
-  receiver-hours heard SoCal (polar route; auroral absorption not modeled). Asia: too few
-  hearings (~19) to judge. Real morning (06–09 PDT) Oceania opening confirmed (7.9% heard).
+- Europe over-predicted by 2609.002/.003: 06–15 PDT mean strength ~0.3 but <1% of 44k European
+  receiver-hours heard SoCal (polar route) — fixed by auroral absorption in 2609.004. Asia: too
+  few hearings (~19) to judge. Real morning (06–09 PDT) Oceania opening confirmed (7.9% heard).
 
 **Skip circle (frontend `estimateSkipKm` in index.html):** mirrors the server math
 (`estimateFoF2`, `hopMFactor` — constants must stay in sync). For 24 bearings finds
@@ -136,6 +143,8 @@ Applied multiplicatively after absorption and kp_penalty. Normalized so λ/4 ver
 **Known limitations:**
 - Single hop-count threshold (3,500 km) causes small strength steps where n changes
 - No sporadic-E or transequatorial propagation; greyline is a simple heuristic boost
+- Calibration (foF2 fit, auroral term, display cutoff 0.12) comes from one week near the
+  September 2026 equinox, SFI 101–121, Kp ≤ 4.3, one QTH (SoCal) — re-check in other seasons
 - Frontend "Use antenna" gate: before 2609.002 the controls looked active on load while the
   box was unticked, so antenna changes were silently ignored. Now any antenna control
   auto-ticks it, settings persist in localStorage `hf_antenna`, and a saved hex beam opens on 20m
