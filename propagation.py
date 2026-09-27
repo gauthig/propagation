@@ -3,6 +3,7 @@ import urllib.error
 import xml.etree.ElementTree as ET
 import json
 import logging
+import os
 import time
 import datetime
 
@@ -314,9 +315,36 @@ def _vertical_factor(h_lam):
     return max(0.65, 1.0 - (h_lam - 0.35) * 0.5)  # too tall: pattern moves up
 
 
+# ── Zero Five 10–80m elevated ground plane (NEC2++ table) ──────────────────────
+
+EGP_SOILS  = ('poor', 'average', 'good')
+_EGP_PATH  = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'antennas', 'zerofive_10_80.json')
+_egp_table = None
+
+
+def _egp_factor(freq_center, base_height_m, soil, elev_rad):
+    """Power ratio vs the λ/4 baseline vertical at each takeoff angle, for the Zero Five 10–80m.
+
+    The table (tools/antenna/zerofive_egp.py) holds NEC2++ results per band × base height ×
+    soil × elevation, already including the 4:1 UnUn and 100 ft RG-213 mismatch loss.
+    """
+    global _egp_table
+    if _egp_table is None:
+        with open(_EGP_PATH, encoding='utf-8') as f:
+            _egp_table = json.load(f)
+    band = min(_egp_table['bands'].values(), key=lambda b: abs(b['freq'] - freq_center))
+    rows = np.asarray(band['delta_db'][soil if soil in EGP_SOILS else 'average'], dtype=float)
+    hts  = np.asarray(_egp_table['heights_ft'], dtype=float)
+    h_ft = float(np.clip(base_height_m / 0.3048, hts[0], hts[-1]))
+    i    = int(np.clip(np.searchsorted(hts, h_ft) - 1, 0, len(hts) - 2))
+    w    = (h_ft - hts[i]) / (hts[i + 1] - hts[i])
+    curve = rows[i] * (1 - w) + rows[i + 1] * w
+    return 10 ** (np.interp(np.degrees(elev_rad), _egp_table['elev_deg'], curve) / 10)
+
+
 def calculate_muf_map(station_lat, station_lon, freq_min, freq_max, solar_indices=None,
                       antenna_type='vertical', height_m=10.0,
-                      beam_azimuth=None, dipole_orient=0.0, now=None):
+                      beam_azimuth=None, dipole_orient=0.0, now=None, soil='average'):
     """
     Return list of [lat, lon, strength] (strength 0–1) for heatmap rendering.
     strength = 1 → band wide open; 0 → band closed.
@@ -409,6 +437,8 @@ def calculate_muf_map(station_lat, station_lon, freq_min, freq_max, solar_indice
 
     if antenna_type == 'vertical':
         ant_f = _vertical_factor(h_lam)   # scalar, broadcasts over the grid
+    elif antenna_type == 'egp_zf80':
+        ant_f = _egp_factor(freq_center, height_m, soil, elev)   # height_m = base (radial) height
     else:
         # True bearing station → cell
         x = np.sin(dlon) * np.cos(la2)

@@ -32,7 +32,9 @@ propagation/
 ├── propagation.py      # Ionospheric model — foF2, MUF, antenna factors
 ├── templates/
 │   └── index.html      # Single-page UI — D3 map, panel, all JavaScript
+├── antennas/           # Antenna gain tables (NEC2++-generated JSON) — packaged with the Lambda
 ├── tools/validate/     # Dev-only: score the model against ionosondes and WSPR (see its README)
+├── tools/antenna/      # Dev-only: NEC2++ generators for antennas/ (see its README)
 ├── requirements.txt    # flask, numpy  (boto3 is pre-installed in the Lambda runtime)
 ├── LOCAL_INSTALL.md    # Running the app on your own machine
 └── AWS_INSTALL.md      # Deploying to AWS Lambda with DynamoDB and CloudFront
@@ -111,6 +113,9 @@ Check **Use antenna** to apply antenna pattern to the heatmap. Unchecked = basel
 | **Vertical** | Omnidirectional. λ/4 height optimal. |
 | **Dipole** | Figure-8 pattern. Signal radiates broadside (90° to wire). |
 | **Hex Beam** | ~60° beamwidth, ~6 dBd gain, ~19 dB F/B. 20m–10m only. |
+| **Elevated GP (Zero Five 10–80m)** | 43 ft radiator with six 130" elevated radials, base 4–12 ft, 4:1 UnUn and 100 ft RG-213 to a shack tuner. Modeled in NEC2++ against the baseline vertical at every takeoff angle, for the chosen **Soil** (poor/average/good). About −7 dB on 80m (coax loss at high SWR), about −2 dB on 60m, even to +5 dB on 40m–17m, and high-angle lobes on 12m–10m. See [`tools/antenna/`](tools/antenna/README.md). |
+
+Heights: 10–100 ft for dipole/hex beam (antenna height), 4–12 ft for the elevated GP (base/radial height). Settings are remembered in the browser.
 
 ### Solar indices panel
 

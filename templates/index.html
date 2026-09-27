@@ -519,24 +519,24 @@
           <option value="vertical">Vertical</option>
           <option value="dipole">Dipole</option>
           <option value="hex_beam">Hex Beam</option>
+          <option value="egp_zf80">Elevated GP (Zero Five 10–80m)</option>
         </select>
         <div id="ant-height-wrap" style="display:flex;align-items:center;gap:6px">
-          <span class="ant-label">Height from Ground</span>
-          <select id="ant-height" class="ant-select" style="width:68px" onchange="onAntSettingChange()">
-            <option value="10">10 ft</option>
-            <option value="15">15 ft</option>
-            <option value="20">20 ft</option>
-            <option value="25">25 ft</option>
-            <option value="30" selected>30 ft</option>
-            <option value="35">35 ft</option>
-            <option value="40">40 ft</option>
-            <option value="45">45 ft</option>
-            <option value="50">50 ft</option>
-            <option value="55">55 ft</option>
-            <option value="75">75 ft</option>
-            <option value="100">100 ft</option>
-          </select>
+          <span class="ant-label" id="ant-height-label">Height from Ground</span>
+          <!-- options filled by setHeightOptions(): the elevated GP uses base heights 4–12 ft -->
+          <select id="ant-height" class="ant-select" style="width:68px" onchange="onAntSettingChange()"></select>
         </div>
+      </div>
+
+      <!-- Elevated ground plane: soil under the antenna -->
+      <div id="ant-soil-row" class="ant-row" style="display:none"
+           title="Soil sets how much the elevated radials gain over a ground-mounted vertical">
+        <span class="ant-label">Soil</span>
+        <select id="ant-soil" class="ant-select" style="flex:1" onchange="onAntSettingChange()">
+          <option value="poor">Poor — desert, dry sand, rocky, urban</option>
+          <option value="average" selected>Average — pasture, heavy clay</option>
+          <option value="good">Good — rich farmland, marshy</option>
+        </select>
       </div>
 
       <!-- Hex beam: azimuth input -->
@@ -717,6 +717,7 @@
         <li><b>Vertical (baseline):</b> Omnidirectional. λ/4 height = factor 1.0. Shorter reduces efficiency; longer shifts the pattern upward.</li>
         <li><b>Dipole:</b> Figure-8 pattern broadside to the wire (sin² azimuth). Elevation pattern follows the ground-reflection lobe model F(θ) = |sin(π·h/λ·sin θ)|. Higher = better low-angle DX radiation.</li>
         <li><b>Hex Beam:</b> ±30° beamwidth, ~6 dBd forward gain, ~19 dB front-to-back. Valid on 20m–10m only (design frequency range). Same elevation model as dipole.</li>
+        <li><b>Elevated GP (Zero Five 10–80m):</b> a 43 ft radiator with six 130-inch radials, base 4–12 ft above ground, fed through a 4:1 UnUn and 100 ft of RG-213 to a tuner in the shack. Modeled in the NEC2++ antenna simulator over the chosen soil, and compared with the baseline vertical (a resonant λ/4 with a good radial field) at every takeoff angle. It is weak on 80m (about −7 dB, mostly coax loss at the very high SWR) and about −2 dB on 60m. It is even to about +5 dB on 40m–17m, with 20m the standout. On 12m–10m it splits into high-angle lobes ("cloud-warmer"). Poor soil favors it most, because elevated radials avoid the ground losses a buried radial field has.</li>
         <li>Takeoff angle per path is estimated from curved-earth geometry using the F2 layer height (300 km) and per-hop distance (minimum 3°).</li>
         <li>All antennas assume resonance on the selected band and average ground (σ ≈ 5 mS/m).</li>
       </ul>
@@ -1579,21 +1580,47 @@ function enableAntenna() {
   syncAntEnabledStyle();
 }
 
+// Mounting heights (ft): antenna height for dipole/hex; base (radial) height for the elevated GP
+const HEIGHTS_STD = [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 75, 100];
+const HEIGHTS_EGP = [4, 5, 6, 7, 8, 9, 10, 11, 12];
+const HEIGHT_DEFAULT = { std: '30', egp: '8' };        // Zero Five recommends a 7–10 ft base
+let _heightKind = null;                                 // which list is loaded: 'std' | 'egp'
+let _savedHeights = { std: '30', egp: '8' };            // last choice per list, survives type switches
+
+function heightKind(type) { return type === 'egp_zf80' ? 'egp' : 'std'; }
+
+function setHeightOptions(kind) {
+  if (kind === _heightKind) return;
+  const sel = document.getElementById('ant-height');
+  if (_heightKind) _savedHeights[_heightKind] = sel.value;
+  const list = kind === 'egp' ? HEIGHTS_EGP : HEIGHTS_STD;
+  sel.innerHTML = list.map(h => `<option value="${h}">${h} ft</option>`).join('');
+  const want = _savedHeights[kind];
+  sel.value = list.includes(Number(want)) ? want : HEIGHT_DEFAULT[kind];
+  document.getElementById('ant-height-label').textContent = kind === 'egp' ? 'Base Height' : 'Height from Ground';
+  _heightKind = kind;
+}
+
 function showAntennaRows() {
   const ant = document.getElementById('ant-type').value;
+  setHeightOptions(heightKind(ant));
   document.getElementById('ant-beam-row').style.display    = ant === 'hex_beam' ? '' : 'none';
   document.getElementById('ant-dipole-row').style.display  = ant === 'dipole'   ? '' : 'none';
+  document.getElementById('ant-soil-row').style.display    = ant === 'egp_zf80' ? '' : 'none';
   document.getElementById('ant-height-wrap').style.display = ant === 'vertical' ? 'none' : '';
 }
 
 function saveAntenna() {
   try {
+    _savedHeights[_heightKind] = document.getElementById('ant-height').value;
     localStorage.setItem(LS_ANT, JSON.stringify({
       enabled: document.getElementById('ant-enable').checked,
       type:    document.getElementById('ant-type').value,
-      height:  document.getElementById('ant-height').value,
+      height:  _savedHeights.std,
+      height_egp: _savedHeights.egp,
       azimuth: document.getElementById('ant-azimuth').value,
       orient:  document.getElementById('ant-dipole-orient').value,
+      soil:    document.getElementById('ant-soil').value,
     }));
   } catch {}
 }
@@ -1603,13 +1630,15 @@ function restoreAntenna() {
   try { s = JSON.parse(localStorage.getItem(LS_ANT)); } catch {}
   if (s) {
     const set = (id, v) => { if (v != null && v !== '') document.getElementById(id).value = v; };
+    if (s.height) _savedHeights.std = String(s.height);
+    if (s.height_egp) _savedHeights.egp = String(s.height_egp);
     set('ant-type', s.type);
-    set('ant-height', s.height);
     set('ant-azimuth', s.azimuth);
     set('ant-dipole-orient', s.orient);
+    set('ant-soil', s.soil);
     document.getElementById('ant-enable').checked = !!s.enabled;
   }
-  showAntennaRows();
+  showAntennaRows();                                    // loads the right height list + saved value
   syncAntEnabledStyle();
 }
 
@@ -1876,6 +1905,7 @@ function loadBand(band) {
     url += `&antenna=${antType}&height_ft=${heightFt}`;
     if (antType === 'hex_beam') url += `&azimuth=${document.getElementById('ant-azimuth').value}`;
     if (antType === 'dipole')   url += `&dipole_orient=${document.getElementById('ant-dipole-orient').value}`;
+    if (antType === 'egp_zf80') url += `&soil=${document.getElementById('ant-soil').value}`;
   }
 
   const failsafe = setTimeout(() => {

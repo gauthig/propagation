@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 67f4cc15-833d-49d0-982f-a2dd3f24bb7c
-  modified: 2026-09-27T16:40:34.292Z
+  modified: 2026-09-27T17:09:54.453Z
 ---
 
 ## Ionospheric model (`propagation.py` → `calculate_muf_map`)
@@ -134,6 +134,15 @@ Applied multiplicatively after absorption and kp_penalty. Normalized so λ/4 ver
 - `wire_az = dipole_orient % 180` (symmetric)
 - Azimuth factor: `sin²(angle_from_wire)`, min 0.02
 - Elevation factor: `|sin(π · h/λ · sin(takeoff))| / EL_NORM`, min 0.05
+
+**Elevated GP — Zero Five 10–80m (`egp_zf80`, 2609.006):** `_egp_factor` reads
+`antennas/zerofive_10_80.json` (NEC2++, see [[reference-nec2pp]]): delta dB vs the λ/4 baseline per
+band × base height 4–12 ft × soil (poor 5/0.001, average 13/0.005, good 20/0.03) × elevation 1–89°,
+incl. 4:1 UnUn + 100 ft RG-213 mismatch loss (user's setup), linearly interpolated → power ratio.
+Avg soil, 7 ft, @10°/20°: 80m −7.4/−7.4, 60m −2.3/−2.4, 40m +0.2/−0.2, 30m +1.2/+0.1, 20m +1.8/−0.5,
+17m +0.7/+1.0, 15m −1.2/+1.3, 10m −2.2/−5.2 (poor soil adds ~+1…+3 dB on 40–10m). Quirk: the app's
+"Vertical" option is really a 30 ft vertical via `_vertical_factor` (UI hides its height), so it
+isn't exactly the λ/4 reference the table is relative to.
 
 **Hex Beam:**
 - Valid bands: 20m, 17m, 15m, 10m. Error shown and heatmap cleared for 80m/60m/40m.

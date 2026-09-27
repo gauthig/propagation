@@ -65,6 +65,7 @@ compact CSS, camelCase JS). Terraform: `terraform fmt` after edits.
 ---
 
 ## Decisions log
+- 2026-09-27 — Elevated GP antenna: Zero Five 10–80m (2609.006) — modeled in NEC2++ (built locally with MinGW from tmolteno/necpp; no Python-3.14 wheels) rather than rules of thumb: 43 ft radiator, 6×130" elevated radials, base 4–12 ft, 4:1 UnUn + 100 ft RG-213 to a lossless shack tuner (user's setup). Baseline kept as the app's λ/4 ground-mounted vertical with a good radial field (10 Ω), computed MININEC-style because NEC-2 can't model ground-connected wires (a grounded λ/4 gave 200−j157 Ω). Table per band × base height × soil × elevation in `antennas/zerofive_10_80.json` (generator `tools/antenna/zerofive_egp.py`), packaged with the Lambda; propagation interpolates by base height and takeoff angle. New Soil setting (poor/average/good) — only the elevated GP uses it today. Rejected: a radio-to-tuner SWR input (a shack tuner doesn't change coax SWR, and radio-side mismatch loss is ≤0.2 dB at 1.5:1). Tuner *location* (remote at feedpoint) would matter — a possible future option
 - 2026-09-27 — Tropical foF2 re-fit + UI (2609.005) — equatorial terms now use centred-dipole *geomagnetic* latitude (the anomaly follows the magnetic equator, ~10°S of geographic over Brazil), weight cos(maglat)^8, boost 0.4, extra decay 4 h, plus a pre-reversal evening term ×(1+0.3·w) centred 20 LT (±2.5 h), fitted on 29 ionosondes via tools/validate: tropics RMSE 2.34→1.82 MHz, evening bias −2.1→+0.2, mid-lat neutral; WSPR neutral (20m AUC 0.865→0.862, 40m 0.904→0.907) — Pacific paths brighter without more hearings because long multi-hop path loss isn't modeled (next limitation). Rejected geographic-latitude weighting (every top fit used magnetic). Also: Help "Open Source" section (GPL-3.0, github.com/gauthig/propagation); antenna heights 15/25/35/45/55 ft added
 - 2026-09-27 — Auroral absorption (2609.004) — loss at each hop ground point from a Gaussian zone in centred-dipole geomagnetic latitude (centre 72−2·Kp, width 4°, 20 dB/crossing at 20m, ×(f₂₀/f)^0.5), tuned on WSPR with a 4/3-day train/test split: held-out AUC 20m 0.814→0.859, 40m 0.789→0.887; Europe from SoCal 0.17→0.01 mean (0.2% heard on both bands). Rejected (f₂₀/f)² pure-absorption scaling — 40m data preferred ^0.5 (European 40m hearings shown dark 69%→21%); the term also stands in for less frequency-dependent auroral scatter
 - 2026-09-27 — Ionosonde-fitted foF2 + probability strength (2609.003) — foF2 constants grid-fitted to 16,200 GIRO soundings via KC2G (`prop.kc2g.com/api/history.json?station=<id>`; GIRO's own DIDBGetValues was 404): peak 2.85+0.052·SFI, F2 lit from sun −20°, lag 1.5 h, decay 2 h, floor 0.43, equatorial ×(1+0.4·cos²⁴lat) and +6 h decay, polar −20% from 45°→65°. Strength is now P(open)=Φ(−ln r/0.14) (σ measured) instead of the ad-hoc 1.35× tail, which overstated openness 2–5×. Validated on a week of 20m WSPR from SoCal (wspr.live): AUC 0.80→0.83, heard-but-dark 16%→5%. Frontend hides strength <0.12 and fades to 0.35 — needed because ~9 blobs overlap per pixel and saturate the alpha cap. Rejected: per-blob alpha fade alone (overlap saturation defeats it). Open: polar/auroral absorption (Europe over-predicted, pre-existing), VOACAP comparison (needs a software install), one-week/equinox-only calibration
@@ -100,7 +101,7 @@ compact CSS, camelCase JS). Terraform: `terraform fmt` after edits.
 
 ### 1. Repackage lambda.zip after every code change
 
-Any edit to `app.py`, `propagation.py`, or `templates/` requires rebuilding the zip before the task is reported as done.
+Any edit to `app.py`, `propagation.py`, `templates/` or `antennas/` requires rebuilding the zip before the task is reported as done.
 
 **Step 0 — bump the version.** `APP_VERSION` in `app.py` uses the format `YYMM.###`
 (e.g. `2607.003` = 3rd build of July 2026). Increment `###` on every build; when the
@@ -122,6 +123,7 @@ pip install --platform manylinux_2_28_x86_64 --implementation cp --python-versio
 
 Copy-Item app.py, propagation.py $pkg
 Copy-Item templates "$pkg\templates" -Recurse
+Copy-Item antennas "$pkg\antennas" -Recurse      # NEC2++ antenna tables read by propagation.py
 
 # OneDrive locks lambda.zip mid-sync — build in TEMP, then copy into the repo.
 $tmp = "$env:TEMP\lambda_build.zip"

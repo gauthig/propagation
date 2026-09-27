@@ -13,7 +13,7 @@ import os
 from collections import OrderedDict
 from decimal import Decimal
 from io import BytesIO
-from propagation import calculate_muf_map, get_solar_indices, http_get, _NET_ERRORS
+from propagation import calculate_muf_map, get_solar_indices, http_get, _NET_ERRORS, EGP_SOILS
 
 import boto3
 
@@ -28,7 +28,7 @@ log = logging.getLogger('hf')
 # ── Configuration ──────────────────────────────────────────────────────────────
 # Version format YYMM.### — ### increments every build and resets to 001 at the
 # start of each month (see CLAUDE.md packaging rule).
-APP_VERSION = '2609.005'
+APP_VERSION = '2609.006'
 SITE_URL    = 'https://propagation.ggcloud.us'  # canonical origin — used by robots.txt / sitemap.xml
 
 DEFAULT_LAT = 39.8
@@ -323,13 +323,14 @@ _HEATMAP_CACHE_MAX = 32
 _heatmap_cache = OrderedDict()
 
 
-def _heatmap_key(band, lat, lon, antenna_type, height_m, beam_azimuth, dipole_orient, solar):
+def _heatmap_key(band, lat, lon, antenna_type, height_m, beam_azimuth, dipole_orient, solar, soil):
     return (
         band,
         round(lat * 2) / 2, round(lon * 2) / 2,        # snap QTH to 0.5° to avoid thrash
         antenna_type, round(height_m, 1),
         round(beam_azimuth, 1) if beam_azimuth is not None else -1.0,
         round(dipole_orient, 1),
+        soil,
         round(float(solar.get('SFI', 100))),
         round(float(solar.get('K-index', 2)), 1),
         datetime.datetime.now(datetime.timezone.utc).hour,
@@ -337,9 +338,9 @@ def _heatmap_key(band, lat, lon, antenna_type, height_m, beam_azimuth, dipole_or
 
 
 def _compute_heatmap(band, lat, lon, solar, antenna_type='vertical', height_m=10.0,
-                     beam_azimuth=None, dipole_orient=0.0):
+                     beam_azimuth=None, dipole_orient=0.0, soil='average'):
     """Return a heatmap from the LRU cache, computing+caching on miss."""
-    key = _heatmap_key(band, lat, lon, antenna_type, height_m, beam_azimuth, dipole_orient, solar)
+    key = _heatmap_key(band, lat, lon, antenna_type, height_m, beam_azimuth, dipole_orient, solar, soil)
     with _lock:
         data = _heatmap_cache.get(key)
         if data is not None:
@@ -349,7 +350,7 @@ def _compute_heatmap(band, lat, lon, solar, antenna_type='vertical', height_m=10
     freq_min, freq_max = BAND_FREQS[band]
     data = calculate_muf_map(lat, lon, freq_min, freq_max, solar,
                              antenna_type=antenna_type, height_m=height_m,
-                             beam_azimuth=beam_azimuth, dipole_orient=dipole_orient)
+                             beam_azimuth=beam_azimuth, dipole_orient=dipole_orient, soil=soil)
     with _lock:
         _heatmap_cache[key] = data
         _heatmap_cache.move_to_end(key)
@@ -770,8 +771,11 @@ def heatmap(band):
         req_lat, req_lon = DEFAULT_LAT, DEFAULT_LON
 
     antenna_type = request.args.get('antenna', 'vertical')
-    if antenna_type not in ('vertical', 'dipole', 'hex_beam'):
+    if antenna_type not in ('vertical', 'dipole', 'hex_beam', 'egp_zf80'):
         antenna_type = 'vertical'
+    soil = request.args.get('soil', 'average')
+    if soil not in EGP_SOILS:
+        soil = 'average'
     try:
         height_ft = float(request.args.get('height_ft', 30))
     except (TypeError, ValueError):
@@ -798,7 +802,7 @@ def heatmap(band):
 
     data = _compute_heatmap(band, req_lat, req_lon, solar,
                             antenna_type=antenna_type, height_m=height_m,
-                            beam_azimuth=beam_azimuth, dipole_orient=dipole_orient)
+                            beam_azimuth=beam_azimuth, dipole_orient=dipole_orient, soil=soil)
     return jsonify(data)
 
 

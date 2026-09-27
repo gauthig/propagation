@@ -35,8 +35,11 @@ Dark glass-morphism panel (top-left, fixed, scrollable, max-height 100vh).
      before 2609.002 changes were silently ignored while it was unticked.
    - Settings persist in localStorage `hf_antenna` (`saveAntenna`/`restoreAntenna`); a restored
      active hex beam makes the page open on 20m instead of the default 40m
-   - Type: Vertical | Dipole | Hex Beam
-   - Height (10–100 ft) — hidden when Vertical selected
+   - Type: Vertical | Dipole | Hex Beam | Elevated GP (Zero Five 10–80m, `egp_zf80`)
+   - Height — hidden for Vertical. `setHeightOptions()` swaps the list: 10–100 ft ("Height from
+     Ground") for dipole/hex, 4–12 ft ("Base Height", default 8) for the elevated GP; each list's
+     last value is remembered separately (`hf_antenna.height` / `.height_egp`)
+   - Soil (poor/average/good, `#ant-soil`) — shown only for the elevated GP; sent as `&soil=`
    - Hex Beam: azimuth input (applies 400 ms after typing stops); error shown if band is 80m/60m/40m
    - Dipole: wire orientation select (N-S, NE-SW, E-W, NW-SE)
 
