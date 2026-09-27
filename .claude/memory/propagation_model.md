@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 67f4cc15-833d-49d0-982f-a2dd3f24bb7c
-  modified: 2026-09-27T16:01:36.116Z
+  modified: 2026-09-27T16:09:26.359Z
 ---
 
 ## Ionospheric model (`propagation.py` → `calculate_muf_map`)
@@ -50,7 +50,9 @@ path ends ×1): `_AUR_DB · (f20/f)^0.5 · exp(−½((|maglat| − (72 − 2·Kp
 `_mag_lat` = centred dipole, pole 80.8N 72.7W (Hudson Bay/S Greenland/Iceland ≈ 69°, London 53°,
 DM14 41°, Anchorage 62°). Tuned on 20m WSPR (train Sep 20–24 12Z / test after): held-out AUC
 0.814→0.859; 40m check 0.789→0.887. Freq exponent 0.5 chosen from 40m data over physical 2.
-Scripts: fit_aur.py / fit_aur40.py pattern (wspr.live, band=14 / band=7).
+Re-run with the committed kit `tools/validate/` (fetch_data.py → ionosonde.py / wspr.py, with
+`--baseline <git ref>`, `--split`, `--set NAME=VALUE`). On the wider 29-station set (Sep 27 fetch)
+the tropics' evening foF2 is still −1.8 to −2.3 MHz low — the next calibration target.
 
 **D-layer absorption (per hop, summed):**
 `loss_dB = 677·(1+0.0037·SSN)·cos(χ)^0.75 / (f+1.4)² · M` (χ unlagged) →

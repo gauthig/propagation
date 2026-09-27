@@ -32,6 +32,7 @@ propagation/
 ├── propagation.py      # Ionospheric model — foF2, MUF, antenna factors
 ├── templates/
 │   └── index.html      # Single-page UI — D3 map, panel, all JavaScript
+├── tools/validate/     # Dev-only: score the model against ionosondes and WSPR (see its README)
 ├── requirements.txt    # flask, numpy  (boto3 is pre-installed in the Lambda runtime)
 ├── LOCAL_INSTALL.md    # Running the app on your own machine
 └── AWS_INSTALL.md      # Deploying to AWS Lambda with DynamoDB and CloudFront
@@ -249,6 +250,8 @@ Implemented in `propagation.py` with numpy-vectorized grid math; solar data is f
 **foF2** — daytime peak `2.85 + 0.052×SFI` (~8.1 MHz at SFI 100 at mid-latitudes), shaped by the solar zenith angle at each reflection point, so time of day, season and latitude all count. The layer starts ionizing when the sun is 20° below the horizon (at ~300 km it is sunlit before ground sunrise), lags the sun by 1.5 h, and fades after sunset with a 2 h time constant down to a night floor of 43% of the peak. Near the equator the peak is up to 40% higher and the evening fade 6 h slower (equatorial anomaly); above 45° latitude the peak tapers down by up to 20% (trough/auroral zone).
 
 **Calibration and validation (Sep 2026)** — the foF2 constants were fitted to 16,200 GIRO ionosonde soundings (12 stations, one week, SFI 101–121) via [KC2G's API](https://prop.kc2g.com/stations/): mid-latitude RMSE 1.26 → 0.83 MHz with no time-of-day bias, tropics 3.11 → 1.70 MHz, MUF(3000) bias +0.1 MHz. The whole map was then scored against a week of 20m WSPR reception from Southern California (106,000 receiver-hours from [wspr.live](https://wspr.live)): ranking AUC 0.80 → 0.83, and heard paths shown dark 16% → 5%.
+
+The ionosonde and WSPR checks can be re-run with the scripts in [`tools/validate/`](tools/validate/README.md).
 
 **Auroral absorption** — hop ground points (D-layer crossings) near the auroral zone lose `20 dB × exp(−½((|geomag lat| − (72 − 2·Kp)) / 4)²)` per crossing at 20m, scaled by `(f₂₀/f)^0.5`, using a centred-dipole geomagnetic latitude (pole 80.8°N, 72.7°W). Tuned on WSPR with a 4-day/3-day train/test split: held-out AUC 0.814 → 0.859 on 20m and 0.789 → 0.887 on 40m. The West Coast ↔ Europe polar route drops from ~0.17 to ~0.01 mean strength, matching the 0.2% of European receivers that heard Southern California.
 

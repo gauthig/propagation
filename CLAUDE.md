@@ -161,6 +161,15 @@ Lambda is running **Python 3.14**. Do not use syntax or stdlib features that req
 ```
 Must use the venv — system Python 3.14 has a Flask/Werkzeug incompatibility.
 
+**Validate the model against real data** (dev-only kit in `tools/validate/`, see its README):
+```powershell
+.\venv\Scripts\python.exe tools\validate\fetch_data.py --days 7 --bands 20m,40m
+.\venv\Scripts\python.exe tools\validate\ionosonde.py --baseline HEAD~1
+.\venv\Scripts\python.exe tools\validate\wspr.py --band 20m --baseline HEAD~1 --split "YYYY-MM-DD HH:MM"
+```
+Run this before and after any change to `propagation.py` constants; `--set NAME=VALUE` tries a
+calibration without editing code. Lint with `ruff check app.py propagation.py tools\validate`.
+
 **Deploy (Terraform — the standard path):**
 ```powershell
 terraform -chdir=terraform plan -out=tfplan   # review the plan first — expect only intended changes

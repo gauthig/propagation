@@ -20,6 +20,9 @@ terraform/*.tfstate.*
 terraform/terraform.tfvars
 # NOTE: terraform/.terraform.lock.hcl IS committed — it pins provider versions
 
+# ── Validation data (re-downloaded by tools/validate/fetch_data.py) ──
+tools/validate/data/
+
 # ── Local / editor ───────────────────────────────────────────
 .env
 *.log
