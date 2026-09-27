@@ -110,7 +110,7 @@ Check **Use antenna** to apply antenna pattern to the heatmap. Unchecked = basel
 
 | Antenna | Description |
 |---|---|
-| **Vertical** | Omnidirectional. λ/4 height optimal. |
+| **Vertical** | The reference: a resonant λ/4 vertical cut for the selected band, with a good radial field (≈32 on-ground radials, ~10 Ω loss). Omnidirectional, no height setting; same as leaving "Use antenna" unticked. |
 | **Dipole** | Figure-8 pattern. Signal radiates broadside (90° to wire). |
 | **Hex Beam** | ~60° beamwidth, ~6 dBd gain, ~19 dB F/B. 20m–10m only. |
 | **Elevated GP (Zero Five 10–80m)** | 43 ft radiator with six 130" elevated radials, base 4–12 ft, 4:1 UnUn and 100 ft RG-213 to a shack tuner. Modeled in NEC2++ against the baseline vertical at every takeoff angle, for the chosen **Soil** (poor/average/good). About −7 dB on 80m (coax loss at high SWR), about −2 dB on 60m, even to +5 dB on 40m–17m, and high-angle lobes on 12m–10m. See [`tools/antenna/`](tools/antenna/README.md). |

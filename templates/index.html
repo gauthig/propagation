@@ -92,6 +92,7 @@
     }
     #band-select { flex:1; }
     #band-select:focus, .ant-select:focus { border-color:#38bdf8; }
+    .ant-select { min-width:0; }   /* let flex rows shrink selects instead of overflowing the panel */
     #band-select option, .ant-select option { background:#1e293b; }
     .ant-row { display:flex; gap:6px; margin-bottom:7px; align-items:center; }
     .ant-label { font-size:0.74rem; color:#94a3b8; text-transform:uppercase;
@@ -521,11 +522,13 @@
           <option value="hex_beam">Hex Beam</option>
           <option value="egp_zf80">Elevated GP (Zero Five 10–80m)</option>
         </select>
-        <div id="ant-height-wrap" style="display:flex;align-items:center;gap:6px">
-          <span class="ant-label" id="ant-height-label">Height from Ground</span>
-          <!-- options filled by setHeightOptions(): the elevated GP uses base heights 4–12 ft -->
-          <select id="ant-height" class="ant-select" style="width:68px" onchange="onAntSettingChange()"></select>
-        </div>
+      </div>
+
+      <!-- Own row: long antenna names would otherwise push it past the panel edge -->
+      <div id="ant-height-wrap" class="ant-row">
+        <span class="ant-label" id="ant-height-label">Height from Ground</span>
+        <!-- options filled by setHeightOptions(): the elevated GP uses base heights 4–12 ft -->
+        <select id="ant-height" class="ant-select" style="flex:1" onchange="onAntSettingChange()"></select>
       </div>
 
       <!-- Elevated ground plane: soil under the antenna -->
@@ -533,9 +536,9 @@
            title="Soil sets how much the elevated radials gain over a ground-mounted vertical">
         <span class="ant-label">Soil</span>
         <select id="ant-soil" class="ant-select" style="flex:1" onchange="onAntSettingChange()">
-          <option value="poor">Poor — desert, dry sand, rocky, urban</option>
-          <option value="average" selected>Average — pasture, heavy clay</option>
-          <option value="good">Good — rich farmland, marshy</option>
+          <option value="poor">Poor (desert, rocky)</option>
+          <option value="average" selected>Average (pasture, clay)</option>
+          <option value="good">Good (farmland, marsh)</option>
         </select>
       </div>
 
@@ -714,7 +717,7 @@
     <div class="help-section">
       <h3>Antenna Model</h3>
       <ul>
-        <li><b>Vertical (baseline):</b> Omnidirectional. λ/4 height = factor 1.0. Shorter reduces efficiency; longer shifts the pattern upward.</li>
+        <li><b>Vertical (baseline):</b> assumed to be a resonant <b>λ/4 vertical cut for whichever band you select</b>, with a good radial field (about 30 or more on-ground radials, ~10 Ω ground loss). That is the usual standard. With its image in the ground, it performs much like a λ/2 vertical dipole. It is omnidirectional and is the reference the other antennas are compared against, so it has no height setting. This is also the map you see with "Use antenna" unticked.</li>
         <li><b>Dipole:</b> Figure-8 pattern broadside to the wire (sin² azimuth). Elevation pattern follows the ground-reflection lobe model F(θ) = |sin(π·h/λ·sin θ)|. Higher = better low-angle DX radiation.</li>
         <li><b>Hex Beam:</b> ±30° beamwidth, ~6 dBd forward gain, ~19 dB front-to-back. Valid on 20m–10m only (design frequency range). Same elevation model as dipole.</li>
         <li><b>Elevated GP (Zero Five 10–80m):</b> a 43 ft radiator with six 130-inch radials, base 4–12 ft above ground, fed through a 4:1 UnUn and 100 ft of RG-213 to a tuner in the shack. Modeled in the NEC2++ antenna simulator over the chosen soil, and compared with the baseline vertical (a resonant λ/4 with a good radial field) at every takeoff angle. It is weak on 80m (about −7 dB, mostly coax loss at the very high SWR) and about −2 dB on 60m. It is even to about +5 dB on 40m–17m, with 20m the standout. On 12m–10m it splits into high-angle lobes ("cloud-warmer"). Poor soil favors it most, because elevated radials avoid the ground losses a buried radial field has.</li>

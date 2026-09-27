@@ -306,15 +306,6 @@ def _gc_point(la1, lo1, la2, lo2, delta, frac):
     return np.arctan2(z, np.hypot(x, y)), np.degrees(np.arctan2(y, x))
 
 
-def _vertical_factor(h_lam):
-    """λ/4 vertical is azimuth-independent → a single scalar across the grid."""
-    if h_lam < 0.15:
-        return max(0.30, h_lam / 0.25)            # short: efficiency drops linearly
-    if h_lam <= 0.35:
-        return 1.0                                # λ/4 sweet spot
-    return max(0.65, 1.0 - (h_lam - 0.35) * 0.5)  # too tall: pattern moves up
-
-
 # ── Zero Five 10–80m elevated ground plane (NEC2++ table) ──────────────────────
 
 EGP_SOILS  = ('poor', 'average', 'good')
@@ -436,7 +427,9 @@ def calculate_muf_map(station_lat, station_lon, freq_min, freq_max, solar_indice
     h_lam = max(0.01, height_m / lam_m)
 
     if antenna_type == 'vertical':
-        ant_f = _vertical_factor(h_lam)   # scalar, broadcasts over the grid
+        # A resonant λ/4 on whichever band is selected, with a good radial field — the reference
+        # every other antenna is compared against, so no height input and a factor of exactly 1.
+        ant_f = 1.0
     elif antenna_type == 'egp_zf80':
         ant_f = _egp_factor(freq_center, height_m, soil, elev)   # height_m = base (radial) height
     else:

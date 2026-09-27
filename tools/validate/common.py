@@ -62,6 +62,7 @@ def load_model(git_ref=None, overrides=()):
         src = subprocess.run(['git', '-C', ROOT, 'show', f'{git_ref}:propagation.py'],
                              check=True, capture_output=True, text=True, encoding='utf-8').stdout
         mod = types.ModuleType(f'propagation@{git_ref}')
+        mod.__file__ = os.path.join(ROOT, 'propagation.py')   # it locates antennas/ relative to itself
         exec(compile(src, f'{git_ref}:propagation.py', 'exec'), mod.__dict__)
     else:
         mod = propagation

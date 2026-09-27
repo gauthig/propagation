@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 67f4cc15-833d-49d0-982f-a2dd3f24bb7c
-  modified: 2026-09-27T17:09:54.453Z
+  modified: 2026-09-27T17:19:58.375Z
 ---
 
 ## Ionospheric model (`propagation.py` → `calculate_muf_map`)
@@ -123,11 +123,10 @@ Applied multiplicatively after absorption and kp_penalty. Normalized so λ/4 ver
 - Takeoff angle = `elev` from `_hop_geometry` (curved earth, per-hop, min 3°)
 - `_EL_NORM = 0.394` — normalization so dipole at 0.5λ broadside gives factor ≈ 1.30
 
-**Vertical (`_vertical_factor`):**
-- Omnidirectional; height_m ignored in UI (hidden when vertical selected)
-- h < 0.15λ → factor scales from 0.3 (efficiency loss) — e.g. 30 ft on 80m caps at ~0.46
-- 0.15–0.35λ (λ/4 sweet spot) → factor 1.0
-- > 0.35λ → factor tapers down (pattern shifts upward)
+**Vertical (2609.007+):** a resonant λ/4 cut for the selected band with a good radial field (~10 Ω) —
+the reference, factor exactly 1.0 on every band, no height input (user decision 2026-09-27: "true
+1/4 wave on whatever frequency they pick"). Before 2609.007 `_vertical_factor(h/λ)` scaled a hidden
+30 ft height (0.46 on 80m, 0.74 on 10m) — removed.
 
 **Dipole:**
 - `dipole_orient` is wire azimuth in degrees (float): 0=N-S, 45=NE-SW, 90=E-W, 135=NW-SE
@@ -140,9 +139,9 @@ Applied multiplicatively after absorption and kp_penalty. Normalized so λ/4 ver
 band × base height 4–12 ft × soil (poor 5/0.001, average 13/0.005, good 20/0.03) × elevation 1–89°,
 incl. 4:1 UnUn + 100 ft RG-213 mismatch loss (user's setup), linearly interpolated → power ratio.
 Avg soil, 7 ft, @10°/20°: 80m −7.4/−7.4, 60m −2.3/−2.4, 40m +0.2/−0.2, 30m +1.2/+0.1, 20m +1.8/−0.5,
-17m +0.7/+1.0, 15m −1.2/+1.3, 10m −2.2/−5.2 (poor soil adds ~+1…+3 dB on 40–10m). Quirk: the app's
-"Vertical" option is really a 30 ft vertical via `_vertical_factor` (UI hides its height), so it
-isn't exactly the λ/4 reference the table is relative to.
+17m +0.7/+1.0, 15m −1.2/+1.3, 10m −2.2/−5.2 (poor soil adds ~+1…+3 dB on 40–10m). Since 2609.007 the
+"Vertical" option is exactly this λ/4 reference, so the two options compare directly. Planned later
+(user, after 2609.007): "advanced antenna features" so users can tune their own setup.
 
 **Hex Beam:**
 - Valid bands: 20m, 17m, 15m, 10m. Error shown and heatmap cleared for 80m/60m/40m.
