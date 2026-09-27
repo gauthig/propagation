@@ -1,11 +1,10 @@
 # HF Propagation App — Memory Index
 
-- [Project overview](project_overview.md) — stack, file map, how to run
-- [Propagation & antenna model](propagation_model.md) — foF2/MUF model (reworked 2026-09 — zenith-driven foF2, curved-earth hops, D-layer absorption, tuning notes), antenna factor, skip circle, known limits
-- [Frontend & map](frontend_map.md) — D3 Winkel Tripel, canvas heatmap, city labels, localStorage persistence, gotchas
-- [API routes & external services](api_routes.md) — Flask routes (including antenna params), solar data sources, ZIP geocoding
-- [UI features](ui_features.md) — panel layout, antenna section, callsign popup, help modal, overlays
-- [Lambda packaging rule](feedback_lambda_packaging.md) — always rebuild lambda.zip after editing app.py, propagation.py, or templates/
-- [OneDrive lock handling](feedback-onedrive-lock.md) — on build file-lock errors, wait 30s for sync and retry (don't reroute the build)
-- [Skipped optimizations](optimizations-skipped.md) — propagation loop micro-opt & index.html minify were declined; don't re-raise
-- [Version scheme](project_versioning.md) — APP_VERSION format YYMM.###; ### bumps each build and resets to 001 at each new month
+- [Project overview](project_overview.md) — what the app is, stack, repo layout, venv, non-obvious infra facts
+- [Roadmap & open items](project-roadmap.md) — planned "advanced antenna" release, tuner-location idea, known model gaps
+- [Propagation & antenna model](propagation_model.md) — current model constants, one-reference antenna/soil design, validation evidence, pitfalls
+- [API routes & services](api_routes.md) — routes incl. /antenna + auth/admin, DynamoDB (TTL history), IAM, CloudFront contract
+- [Frontend & map](frontend_map.md) — layers, heat-canvas cutoff 0.12, skip circle per bearing, greyline, render gotchas
+- [UI features](ui_features.md) — panel controls, antenna/soil/height UI, top-center readout, sign-in gating, localStorage
+- [Lambda packaging rule](feedback_lambda_packaging.md) — bump version + rebuild after app/model/templates/antennas edits; hook & commit gotchas
+- [Version scheme](project_versioning.md) — APP_VERSION YYMM.###; ### bumps each build, resets to 001 monthly

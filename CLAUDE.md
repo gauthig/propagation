@@ -24,10 +24,12 @@ Flask single-page app that displays a real-time HF skywave propagation heatmap f
 | Layer | Technology |
 |---|---|
 | Backend | Python 3.14, Flask, custom Lambda WSGI adapter |
-| Database | AWS DynamoDB — `hf_solar` (solar cache) and `hf_users` (visitor tracking) |
+| Database | AWS DynamoDB — `hf_solar` (solar cache, TTL history) and `hf_users` (accounts + visitor tracking) |
 | Frontend | D3 v7, Winkel Tripel projection, HTML5 Canvas heatmap |
 | Hosting | AWS Lambda (Function URL) → CloudFront → Cloudflare DNS |
 | IaC | Terraform (`terraform/`) |
+| Antenna tables | `antennas/*.json` from NEC2++ generators in `tools/antenna/` (packaged with the Lambda) |
+| Validation | `tools/validate/` — scores the model against ionosondes and WSPR (dev-only) |
 
 **Production URL:** https://propagation.ggcloud.us
 
@@ -39,12 +41,17 @@ Detailed context is stored in `.claude/memory/`. Claude loads these automaticall
 
 | File | Contents |
 |---|---|
-| `project_overview.md` | Architecture, stack, CloudFront/DNS gotchas, DynamoDB tables |
-| `api_routes.md` | All Flask routes, DynamoDB schema, IAM requirements |
-| `propagation_model.md` | foF2/MUF model, antenna factors, known limitations |
-| `frontend_map.md` | D3 map layers, canvas heatmap, localStorage persistence |
-| `ui_features.md` | Panel layout, modals, session tracking helpers |
-| `feedback_lambda_packaging.md` | **Must-follow rule** — always repackage `lambda.zip` after code changes |
+| `project_overview.md` | What the app is, stack, repo layout, venv, non-obvious infra facts |
+| `project-roadmap.md` | Planned work (advanced antenna release), open ideas, known model gaps |
+| `propagation_model.md` | Current model constants, one-reference antenna/soil design, validation evidence, pitfalls |
+| `api_routes.md` | Routes incl. `/antenna` and auth/admin, DynamoDB (TTL history), IAM, CloudFront contract |
+| `frontend_map.md` | Map layers, heat-canvas drawing rules, skip circle, greyline, render gotchas |
+| `ui_features.md` | Panel controls, antenna/soil UI, top-center readout, sign-in gating, localStorage |
+| `feedback_lambda_packaging.md` | **Must-follow rule** — bump version + rebuild `lambda.zip` after code/table changes; build gotchas |
+| `project_versioning.md` | `APP_VERSION` YYMM.### scheme |
+
+Machine-local memories (user profile, permissions, tool paths such as the NEC2++ build) are
+deliberately not committed. `install-memory.ps1` merges the index, so re-running it keeps them.
 
 ---
 
@@ -55,7 +62,7 @@ Summary: PEP 8 base with house relaxations (single quotes, aligned assignments,
 em-dash section banners, 110-col lines, no auto-formatter), enforced by Ruff lint:
 
 ```powershell
-.\venv\Scripts\python.exe -m ruff check app.py propagation.py   # must pass before done
+.\venv\Scripts\python.exe -m ruff check app.py propagation.py tools   # must pass before done
 ```
 
 Config in `ruff.toml`; dev tools via `pip install -r requirements-dev.txt`.
@@ -93,9 +100,10 @@ compact CSS, camelCase JS). Terraform: `terraform fmt` after edits.
 - CloudFront cache policies that include `Host` in the cache key (e.g. managed `UseOriginCacheControlHeaders`) forward the viewer Host to the origin — Lambda Function URLs reject it with 403 and the whole site breaks. Stick to CachingDisabled / CachingOptimized.
 
 ## Do / Don't for Claude
-- DO: run ruff and rebuild `lambda.zip` before reporting any `app.py`/`propagation.py`/`templates/` change done.
+- DO: run ruff and rebuild `lambda.zip` before reporting any `app.py`/`propagation.py`/`templates/`/`antennas/` change done.
+- DO: run `tools/validate/` (ionosonde + WSPR, `--baseline HEAD`) before and after changing model constants.
 - DO: follow the spec/test discipline from global instructions; update this file after major work.
-- DON'T: deploy (`terraform apply`, Lambda zip upload) or `git push` without asking.
+- DON'T: deploy (`terraform apply`, Lambda zip upload) without an explicit yes for that batch. Commits and non-force `git push` are fine (user decision 2026-09-27).
 - DON'T: hand-edit `lambda.zip` or `lambda_package/` — always rebuild via the packaging rule.
 - DON'T: re-raise declined optimizations (propagation loop micro-opt, index.html minify).
 
@@ -173,7 +181,7 @@ Must use the venv — system Python 3.14 has a Flask/Werkzeug incompatibility.
 .\venv\Scripts\python.exe tools\validate\wspr.py --band 20m --baseline HEAD~1 --split "YYYY-MM-DD HH:MM"
 ```
 Run this before and after any change to `propagation.py` constants; `--set NAME=VALUE` tries a
-calibration without editing code. Lint with `ruff check app.py propagation.py tools\validate`.
+calibration without editing code. Lint with `ruff check app.py propagation.py tools`.
 
 **Deploy (Terraform — the standard path):**
 ```powershell

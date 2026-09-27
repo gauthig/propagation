@@ -17,7 +17,7 @@ This guide covers running the HF Propagation Map on your own machine for develop
 ## 1. Clone the repository
 
 ```bash
-git clone https://github.com/your-username/propagation.git
+git clone https://github.com/gauthig/propagation.git
 cd propagation
 ```
 
@@ -44,11 +44,12 @@ source venv/bin/activate
 ## 3. Install dependencies
 
 ```bash
-pip install -r requirements.txt
-pip install boto3
+pip install -r requirements.txt -r requirements-dev.txt
 ```
 
-> `boto3` is included here for local use. It is **not** in `requirements.txt` because the Lambda runtime provides it — adding it to the zip would bloat the package unnecessarily.
+`requirements.txt` holds what ships to Lambda (`flask`, `numpy`). `requirements-dev.txt` adds local-only tools: `ruff` (lint) and `boto3`. boto3 is kept out of `requirements.txt` because the Lambda runtime already provides it.
+
+> **Windows:** if the venv later fails with "did not find executable", the Python install it was built from has moved. Delete `venv` and recreate it.
 
 ---
 
@@ -75,6 +76,7 @@ The app uses `boto3` to read and write two DynamoDB tables (`hf_solar` and `hf_u
         "dynamodb:GetItem",
         "dynamodb:PutItem",
         "dynamodb:UpdateItem",
+        "dynamodb:DeleteItem",
         "dynamodb:Scan",
         "dynamodb:BatchWriteItem"
       ],
@@ -84,7 +86,7 @@ The app uses `boto3` to read and write two DynamoDB tables (`hf_solar` and `hf_u
 }
 ```
 
-> `Scan` and `BatchWriteItem` are required for the solar history pruning logic. Using `"Resource": "*"` avoids ARN-matching issues if table names or regions ever change.
+> `Scan` is used by the admin user list. Add `ses:SendEmail` if you want password-reset emails locally, and set `SES_SENDER_EMAIL` to a verified sender. Using `"Resource": "*"` avoids ARN-matching issues if table names or regions ever change.
 
 ### Configure the AWS CLI
 
@@ -115,6 +117,17 @@ python app.py
 ```
 
 Open your browser to **http://127.0.0.1:5000**
+
+> **Testing template changes:** Flask caches `templates/index.html` and the page is served with a 10-minute `Cache-Control`. After editing the template, restart the server and load `/?nocache=1`, or you'll see the old page.
+
+---
+
+## Optional: validation and antenna tools
+
+- `tools/validate/` scores the model against real ionosonde and WSPR data. See [its README](tools/validate/README.md).
+- `tools/antenna/` regenerates the antenna gain tables in `antennas/` with the NEC2++ simulator. See [its README](tools/antenna/README.md).
+
+Neither is needed to run the app. Both are dev-only and never packaged.
 
 ---
 

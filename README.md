@@ -2,7 +2,7 @@
 
 A real-time HF skywave propagation visualizer for amateur radio operators. Shows estimated band openness from your QTH to every point on the globe, driven by live solar indices and a physics-based ionospheric model.
 
-**🌐 Live site: [propagation.ggcloud.us](https://propagation.ggcloud.us/)** — free to use, no sign-up required.
+**🌐 Live site: [propagation.ggcloud.us](https://propagation.ggcloud.us/)** — free to use. Anyone can browse bands; a free account unlocks your own QTH and antenna settings.
 
 ![Stack](https://img.shields.io/badge/Python-3.14-blue) ![Flask](https://img.shields.io/badge/Flask-3.x-green) ![AWS Lambda](https://img.shields.io/badge/Deploy-AWS%20Lambda-orange) ![DynamoDB](https://img.shields.io/badge/DB-DynamoDB-yellow) ![License](https://img.shields.io/badge/License-GPL--3.0-blue)
 
@@ -13,13 +13,13 @@ A real-time HF skywave propagation visualizer for amateur radio operators. Shows
 ## What It Does
 
 - Fetches live solar data (SFI, K-index, A-index, sunspot number) from hamqsl.com with a NOAA fallback
-- Caches solar data in DynamoDB — shared across all Lambda instances, auto-refreshed when over 2 hours old; keeps a 100-row history of every refresh
-- Computes a global heatmap of propagation probability on the selected amateur band using a multi-hop F2 ionospheric model
-- Renders the heatmap over a Winkel Tripel world map using D3.js and an HTML5 Canvas
-- Supports three antenna models (vertical, dipole, hex beam) with height and orientation controls
-- Lets you set your QTH by Maidenhead grid square, lat/lon, or US ZIP code
-- Tracks visitors in DynamoDB by callsign (the stable cross-browser identity), IP, QTH, and access count
-- Remembers your callsign and QTH across sessions via browser localStorage
+- Caches solar data in DynamoDB, shared across all Lambda instances and auto-refreshed when over 2 hours old. History rows expire after 7 days via DynamoDB TTL.
+- Computes a global heatmap of the probability each amateur band is open, using a multi-hop F2 ionospheric model calibrated against real ionosonde and WSPR data
+- Renders the heatmap over a Winkel Tripel world map using D3.js and an HTML5 Canvas, with an optional greyline overlay
+- Supports four antenna models (λ/4 vertical, dipole, hex beam, and the NEC2++-modeled Zero Five 10–80m elevated ground plane) plus a soil setting. The applied dB is shown on screen.
+- Lets you set your QTH by Maidenhead grid square, lat/lon, or US ZIP code (free account)
+- Accounts by callsign: sign in, register, password reset by email (SES), and admin user management
+- Remembers your QTH, antenna and display settings across sessions via browser localStorage
 - Search-engine ready — meta description, Open Graph tags, schema.org JSON-LD, `/robots.txt`, and `/sitemap.xml`; CloudFront edge-caches the root page and SEO endpoints so crawler traffic rarely invokes Lambda
 
 ---
@@ -46,7 +46,7 @@ propagation/
 
 ![AWS Architecture Diagram](hf_propagation_aws_architecture.svg)
 
-*Browser → Cloudflare DNS → CloudFront (TLS via ACM) → Lambda Function URL → Flask app → DynamoDB. SES handles auth token emails. All resources tagged `app=hf_propagation` and collected in an AWS Resource Group. CloudFront serves `/`, `/robots.txt`, and `/sitemap.xml` from its edge cache (driven by origin `Cache-Control` headers); every other route passes through uncached.*
+*Browser → Cloudflare DNS → CloudFront (TLS via ACM) → Lambda Function URL → Flask app → DynamoDB. SES handles auth token emails. All resources tagged `app=hf_propagation` and collected in an AWS Resource Group. CloudFront serves `/`, `/robots.txt`, `/sitemap.xml` and `/BingSiteAuth.xml` from its edge cache (driven by origin `Cache-Control` headers); every other route passes through uncached.*
 
 ---
 
@@ -61,13 +61,13 @@ propagation/
 
 ## How to Use
 
-### Callsign
+### Account
 
-On first visit a prompt asks for your amateur radio callsign. Enter it and click **Save** — it is stored in browser localStorage and sent to the server to create or update your visitor record. Click **Skip** to continue anonymously (no visitor record is created). You can re-open the callsign dialog at any time by clicking the callsign badge in the panel header.
+Bands, solar data and the greyline overlay work for everyone. Setting your own QTH and antenna needs a free account: click **Sign In / Register** in the panel header and register with your callsign, a password and an email address. The email is used only for password resets. You stay signed in for 30 days.
 
 ### Setting your QTH
 
-Click **Set QTH** at the bottom of the panel. Three entry methods:
+In the **My QTH** section of the panel, choose one of three entry methods and click **Set QTH**:
 
 | Method | Input | Example |
 |---|---|---|
@@ -75,7 +75,7 @@ Click **Set QTH** at the bottom of the panel. Three entry methods:
 | **Lat/Lon** | Decimal degrees | `39.8`, `-98.6` |
 | **ZIP** | US ZIP code | `90210` |
 
-Your callsign and QTH are saved in browser localStorage and restored automatically on every return visit — including when you return from a different browser or device after re-entering your callsign.
+Your QTH is saved in browser localStorage and restored automatically on every return visit.
 
 ### Selecting a band
 
@@ -113,7 +113,7 @@ Check **Use antenna** to apply antenna pattern to the heatmap. Unchecked = basel
 | **Vertical** | A resonant λ/4 vertical cut for the selected band, with a good radial field (≈32 on-ground radials, ~10 Ω loss). Omnidirectional, no height setting. Over average soil it is the 0 dB reference, the same as leaving "Use antenna" unticked. |
 | **Dipole** | Figure-8 pattern. Signal radiates broadside (90° to wire). Elevation lobes follow the height through the ground reflection (fixed in 2609.008: the model previously treated every dipole as half its height). |
 | **Hex Beam** | ~60° beamwidth, ~6 dBd gain, ~19 dB F/B. 20m–10m only. |
-| **Elevated GP (Zero Five 10–80m)** | 43 ft radiator with six 130" elevated radials, base 4–12 ft, 4:1 UnUn and 100 ft RG-213 to a shack tuner. Modeled in NEC2++ against the baseline vertical at every takeoff angle, for the chosen **Soil** (poor/average/good). About −7 dB on 80m (coax loss at high SWR), about −2 dB on 60m, even to +5 dB on 40m–17m, and high-angle lobes on 12m–10m. See [`tools/antenna/`](tools/antenna/README.md). |
+| **Elevated GP (Zero Five 10–80m)** | 43 ft radiator with six 130" elevated radials, base 4–12 ft, 4:1 UnUn and 100 ft RG-213 to a shack tuner. Modeled in NEC2++ band by band over the chosen **Soil**, against the reference at every takeoff angle. Over average soil: about −7 dB on 80m (coax loss at high SWR), about −2 dB on 60m, even to about +2 dB on 40m–17m at low angles (20m is best), and high-angle lobes on 12m–10m. Base height changes it by only 0.5–2 dB. See [`tools/antenna/`](tools/antenna/README.md). |
 
 Heights: 10–100 ft for dipole/hex beam (antenna height), 4–12 ft for the elevated GP (base/radial height). Settings are remembered in the browser.
 
@@ -143,12 +143,30 @@ Returns heatmap data for the specified band.
 |---|---|---|
 | `lat` | 39.8 | Station latitude |
 | `lon` | -98.6 | Station longitude |
-| `antenna` | `vertical` | `vertical`, `dipole`, or `hex_beam` |
-| `height_ft` | 30 | Antenna height in feet |
+| `antenna` | `vertical` | `vertical`, `dipole`, `hex_beam` or `egp_zf80` (Zero Five 10–80m) |
+| `height_ft` | 30 | Antenna height in feet (base/radial height for `egp_zf80`; unused for `vertical`) |
 | `azimuth` | 0 | Hex beam pointing direction (degrees) |
 | `dipole_orient` | 0 | Dipole wire azimuth (0 = N–S, 90 = E–W) |
+| `soil` | `average` | `very_poor`, `poor`, `average`, `good` or `salt_water` |
 
-**Response:** `[[lat, lon, strength], ...]` — strength is 0.0–1.0.
+**Response:** `[[lat, lon, strength], ...]`, where strength (0.0–1.0) is the probability the band is open to that cell, after antenna and soil.
+
+---
+
+### `GET /antenna/<band>`
+
+Takes the same antenna parameters. Returns the dB the map applies for that antenna and soil against the reference (λ/4 vertical, good radials, average soil), in the antenna's best direction:
+
+```json
+{"antenna": "egp_zf80", "soil": {"key": "poor", "label": "Poor", "sigma": 0.002, "er": 10.0, "examples": "desert, dry sand, rocky"},
+ "gains": [{"elev": 10, "db": 2.1}, {"elev": 20, "db": 0.1}], "reference": "λ/4 vertical with good radials over average soil"}
+```
+
+---
+
+### Accounts — `/auth/*` and `/admin/*`
+
+`GET /auth/me`; `POST /auth/login`, `/auth/register`, `/auth/logout`; `POST /auth/reset/request` (emails a 6-character code via SES) and `/auth/reset/confirm`. The session is the `hf_auth` cookie (30 days); passwords are PBKDF2-SHA256 hashed. Admin-only: `GET /admin/users`, `POST /admin/users/deactivate`, `POST /admin/users/reset-password`.
 
 ---
 
@@ -189,7 +207,7 @@ Response: `{"zipcode": "90210", "city": "Beverly Hills", "state": "CA", "lat": 3
 
 ### `GET /robots.txt` · `GET /sitemap.xml`
 
-Static SEO endpoints for search-engine crawlers. Both are sent with `Cache-Control: public, max-age=86400`, and the root page with `max-age=600`. CloudFront has dedicated cache behaviors (CachingOptimized) for exactly `/`, `/robots.txt`, and `/sitemap.xml` that honor those TTLs; every other route uses the CachingDisabled default and always reaches the app. robots.txt disallows the API prefixes (`/auth/`, `/admin/`, `/track/`, `/solar`, `/heatmap/`, `/zip/`).
+Static SEO endpoints for search-engine crawlers (plus `/BingSiteAuth.xml` for Bing verification). They are sent with `Cache-Control: public, max-age=86400`, and the root page with `max-age=600`. CloudFront has dedicated cache behaviors (CachingOptimized) for exactly those paths that honor the TTLs. Every other route uses the CachingDisabled default and always reaches the app. robots.txt disallows the API prefixes (`/auth/`, `/admin/`, `/track/`, `/solar`, `/heatmap/`, `/antenna/`, `/zip/`).
 
 ---
 
@@ -225,12 +243,10 @@ Two kinds of rows coexist in this table:
 | `source` | String | `"hamqsl.com"` or `"NOAA"` |
 | `band_conditions` | Map | Per-band condition strings |
 | `timestamp` | String | ISO 8601 UTC write time |
-| `timestamp_epoch` | Number | Unix epoch — used for TTL comparison |
+| `timestamp_epoch` | Number | Unix epoch — used for the 2-hour freshness check |
 | `refreshed_by` | String | Callsign or `"auto"` |
 
-**History rows** — one new row per refresh, oldest deleted when count exceeds 100:
-
-Same attributes as above, but `record_id` is a UTC timestamp string (e.g. `2026-06-22T14:30:00.123456Z`).
+**History rows**: one new row per refresh, with the same attributes. `record_id` is a UTC timestamp string (e.g. `2026-06-22T14:30:00.123456Z`), and an `expire_at` epoch lets DynamoDB TTL delete the row after 7 days.
 
 ---
 
@@ -247,6 +263,7 @@ Same attributes as above, but `record_id` is a UTC timestamp string (e.g. `2026-
 | `qth_lat` | Number | Station latitude |
 | `qth_lon` | Number | Station longitude |
 | `qth_method` | String | `"grid"`, `"latlon"`, or `"zip"` |
+| `password_hash` etc. | String | Account fields: PBKDF2 hash, login token + expiry, email, reset code, `active` and `admin` flags |
 
 ---
 
@@ -258,7 +275,7 @@ Implemented in `propagation.py` with numpy-vectorized grid math; solar data is f
 
 **foF2** — daytime peak `2.85 + 0.052×SFI` (~8.1 MHz at SFI 100 at mid-latitudes), shaped by the solar zenith angle at each reflection point, so time of day, season and latitude all count. The layer starts ionizing when the sun is 20° below the horizon (at ~300 km it is sunlit before ground sunrise), lags the sun by 1.5 h, and fades after sunset with a 2 h time constant down to a night floor of 43% of the peak. Near the *geomagnetic* equator (weight `cos(maglat)^8`) the peak is up to 40% higher, the evening fade up to 4 h slower, and foF2 gets a further lift of up to 30% around 20:00 local time. This is the equatorial anomaly and its post-sunset "pre-reversal enhancement". Above 45° latitude the peak tapers down by up to 20% (trough/auroral zone). The equatorial terms were re-fitted on 29 ionosondes: tropical RMSE 2.34 → 1.82 MHz, and evening bias −2.1 → +0.2 MHz.
 
-**Calibration and validation (Sep 2026)** — the foF2 constants were fitted to 16,200 GIRO ionosonde soundings (12 stations, one week, SFI 101–121) via [KC2G's API](https://prop.kc2g.com/stations/): mid-latitude RMSE 1.26 → 0.83 MHz with no time-of-day bias, tropics 3.11 → 1.70 MHz, MUF(3000) bias +0.1 MHz. The whole map was then scored against a week of 20m WSPR reception from Southern California (106,000 receiver-hours from [wspr.live](https://wspr.live)): ranking AUC 0.80 → 0.83, and heard paths shown dark 16% → 5%.
+**Calibration and validation (Sep 2026)** — the foF2 constants were fitted to 16,200 GIRO ionosonde soundings (12 stations, one week, SFI 101–121) via [KC2G's API](https://prop.kc2g.com/stations/): mid-latitude RMSE 1.26 → 0.83 MHz with no time-of-day bias, tropics 3.11 → 1.70 MHz, MUF(3000) bias +0.1 MHz. The whole map was then scored against a week of 20m WSPR reception from Southern California (106,000 receiver-hours from [wspr.live](https://wspr.live)): ranking AUC 0.80 → 0.83 with the fit, and 0.865 after auroral absorption. Heard paths shown dark fell from 16% to about 4%.
 
 The ionosonde and WSPR checks can be re-run with the scripts in [`tools/validate/`](tools/validate/README.md).
 
@@ -274,7 +291,7 @@ The ionosonde and WSPR checks can be re-run with the scripts in [`tools/validate
 
 **Geomagnetic penalty** — `1.0 − (K-index / 9) × 0.75` multiplied into all strengths.
 
-**Antenna factor** — normalized so λ/4 vertical = 1.0. Takeoff angle comes from the same curved-earth per-hop geometry. Azimuth and elevation patterns are applied for dipole and hex beam.
+**Antenna factor** — a power ratio against one fixed reference: a λ/4 vertical with good radials over **average** soil, at each path's takeoff angle (same curved-earth per-hop geometry). The vertical and the Zero Five use precomputed tables per band, soil and angle (`antennas/`). The dipole and hex beam combine their azimuth pattern with the direct plus ground-reflected wave for horizontal polarization, over the chosen soil.
 
 **Skip circle** — the browser repeats the same foF2/M-factor math for 24 bearings and draws the shortest single-hop distance whose median MUF reaches the band.
 
@@ -295,7 +312,9 @@ Solar data fetches use the stdlib `urllib` (the `requests` dependency was remove
 
 | Package | Purpose |
 |---|---|
-| `boto3` | AWS SDK — DynamoDB read/write |
+| `boto3` | AWS SDK — DynamoDB read/write, SES email |
+
+**Development** (`requirements-dev.txt`, never packaged): `ruff` (lint) and `boto3` (for local runs). Optional: the NEC2++ command-line tool, only for regenerating antenna tables (see [`tools/antenna/`](tools/antenna/README.md)).
 
 **Frontend** (CDN, no install):
 

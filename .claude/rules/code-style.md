@@ -6,7 +6,10 @@ one-time reformat and to keep the aligned-column readability below. Prettier was
 rejected for the frontend because it would explode the compact CSS and reformat a
 consistent 1,800-line file for no benefit.
 
-## Python (`app.py`, `propagation.py`)
+## Python (`app.py`, `propagation.py`, `tools/`)
+
+Dev tools under `tools/` follow the same rules. They may use `print` for CLI output and should
+fail loudly (no fail-soft `except`), since they're run by a person, not by Lambda.
 
 - PEP 8 defaults unless listed here. Max line length **110**.
 - **Single quotes** for strings; double quotes only to avoid escaping.
@@ -33,7 +36,7 @@ consistent 1,800-line file for no benefit.
 ### Lint
 
 ```powershell
-.\venv\Scripts\python.exe -m ruff check app.py propagation.py
+.\venv\Scripts\python.exe -m ruff check app.py propagation.py tools
 ```
 
 Config lives in `ruff.toml` (rules E, W, F, B, Q; single-quote enforcement; E221/E241

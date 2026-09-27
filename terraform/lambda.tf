@@ -11,7 +11,7 @@ resource "aws_lambda_function" "hf_propagation" {
   handler       = "app.handler"
   role          = aws_iam_role.lambda_exec.arn
 
-  memory_size = 512 # heatmap loop runs ~1800 trig calls per request
+  memory_size = 512 # numpy model ~20 ms/map; memory also sets Lambda CPU share
   timeout     = 30  # allows for slow solar data fetches from hamqsl.com
 
   # AWS_REGION is a reserved Lambda key — the runtime injects it; setting it here

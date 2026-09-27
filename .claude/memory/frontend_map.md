@@ -1,58 +1,40 @@
 ---
 name: frontend-map
-description: "D3 map setup, canvas heatmap, city rendering, session persistence, and known gotchas"
-metadata: 
+description: "D3 map layers, heatmap canvas drawing rules, skip circle, greyline layer, and rendering gotchas"
+metadata:
   node_type: memory
   type: project
   originSessionId: 67f4cc15-833d-49d0-982f-a2dd3f24bb7c
+  modified: 2026-09-27T18:07:29.926Z
 ---
 
-## Map rendering (`templates/index.html`)
+All in `templates/index.html` (single file, no build step; D3 v7 + d3-geo-projection 4 +
+topojson-client 3 from jsDelivr).
 
-**Projection:** Winkel Tripel via `d3.geoWinkelTripel()` from `d3-geo-projection@4`.
-- CDN UMD bundle extends the global `d3` object
-- Falls back to `d3.geoNaturalEarth1()` if CDN fails
-- `fitSize([W, H], {type:'Sphere'})` scales full globe to viewport
-- `buildProjection(lon, W, H)` used everywhere — rotates to `[-lon, 0]` to center on QTH longitude
+**Projection:** `buildProjection(lon, W, H)` = Winkel Tripel (fallback NaturalEarth1) rotated to
+the QTH longitude, `fitSize` to the viewport; rebuilt on resize and on QTH change.
 
-**Layer order (bottom to top in SVG):**
-1. Sphere path (ocean `#1e4d7b`)
-2. Graticule (30° grid, subtle)
-3. Country polygons — Antarctica (id===10) gets `#c8d8e4`, others `#4a7055`
-4. Country borders (`#2d422d`, 0.4px)
-5. Sphere outline ring
-6. `#city-g` group — ~46 city dots + double-rendered labels
-7. `#overlay-g` group — QTH dot + skip-zone circle
+**Layers, bottom → top:** `#worldmap` SVG (ocean, graticule, countries — Antarctica id 10 pale,
+borders, `#city-g`, `#overlay-g` = QTH dot + skip circle) → `#heat-canvas` (CSS `blur(9px)`,
+opacity 0.85) → `#greyline-layer` SVG (twilight band, terminator, sub-solar dot; drawn above the
+blur so it stays crisp).
 
-**Canvas heatmap (separate `<canvas>`):**
-- CSS: `opacity:0.85; filter:blur(9px)`
-- Offscreen canvas (`_offCanvas`) used to cap per-pixel alpha at 145/255 (~57%) so map shows through dense coverage
-- Per-blob alpha: `0.25 + strength * 0.30` (weak = faint, strong = solid)
-- `heatColor(s)` gradient: deep red (0.00) → red (0.20) → orange (0.40) → yellow (0.60) → lime (0.78) → green (1.00)
-- `HEAT_RADIUS = 20` px per blob
-- Canvas and SVG both resized on `window.resize`
+**Heat canvas (`drawHeatCanvas`):** 20 px blobs on an offscreen canvas, alpha capped at 145/255.
+Skips strength < 0.12, fades 0.12–0.35 (WSPR-validated cutoff); `heatColor` red→green. Returns early
+while the canvas is 0×0 (page opened in a background tab) — `onResize` redraws later.
 
-**Overlays (`updateOverlay()`):**
-- QTH dot: 7px cyan circle with SVG glow filter (`#qth-glow`)
-- Skip zone: gray dashed ring, drawn only if > 300 km; radius from `estimateSkipKm(freq, sfi)` JS formula
-- **No 500 km reference ring** (removed — was `QTH_CIRCLE_KM`)
-- Both rings use `d3.geoCircle()` for proper geographic projection
+**Skip circle:** `estimateSkipKm(freq, lat, lon, sfi)` — for 24 bearings, shortest single hop whose
+*midpoint* foF2 (`estimateFoF2`, mirrors `_fof2`) × `hopMFactor` ≥ f; min over bearings, cap
+3,500 km; 150 = NVIS (no circle). Constants must match `propagation.py`.
 
-**City labels:** `drawCities()` called after every `drawBaseMap()`. Double-rendered (shadow + main text). `anchor` property per city controls label placement.
+**Gotchas**
+- `drawBaseMap()` does `svg.selectAll('*').remove()` → always follow with `drawCities()` +
+  `updateOverlay()` (which also redraws the greyline).
+- Greyline band polygon is `[ring93, reverse(ring78)]`; reversing the 93° ring fills the complement.
+  Terminator is drawn as a LineString (a Polygon adds map-edge clip lines).
+- Use `d3.geoCircle()` for geographic rings, not screen circles.
+- Avoid numeric separators like `900_000` in JS (SyntaxError in some environments).
+- Local dev: Flask caches the template and `/` has max-age 600 → restart the server and load
+  `/?nocache=N` after template edits.
 
-**Known gotchas:**
-- `svg.selectAll('*').remove()` in `drawBaseMap()` wipes `#overlay-g` and `#city-g` — always call `drawCities()` + `updateOverlay()` after `drawBaseMap()`
-- `d3.geoCircle()` required for skip ring (not screen circles)
-- `900_000` numeric separator syntax caused SyntaxError in some environments — use `900000`
-
-## Session persistence (localStorage)
-
-`initSession()` is called at boot (after `initMap()`, before `loadBand()`):
-- Reads `localStorage['hf_callsign']` — shows popup if null (never set), shows badge if non-empty, skips popup if empty string
-- Reads `hf_qth_lat`, `hf_qth_lon`, `hf_qth_label` — if valid, sets `qthLat/qthLon` and rebuilds projection before first `loadBand()` so the heatmap loads from the restored location immediately
-
-`onQTHSet(lat, lon, meta)` saves `hf_qth_lat/lon/label` to localStorage every time the user sets a QTH.
-
-Callsign saved via `saveCallsign()` → `localStorage['hf_callsign']`. Skipped via `skipCallsign()` → saves `''` so popup never re-appears.
-
-**Performance:** ~2,300 grid points rendered as canvas arcs in ~5 ms. Single draw on data arrival.
+See [[ui-features]] for panel controls and persistence.

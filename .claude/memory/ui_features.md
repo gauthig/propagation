@@ -1,120 +1,44 @@
 ---
 name: ui-features
-description: "Panel layout, antenna controls, session tracking, JS helpers, modals, overlays, and persistence"
-metadata: 
+description: "Panel controls, antenna/soil UI, top-center readout, sign-in gating, localStorage keys and UI gotchas"
+metadata:
   node_type: memory
   type: project
   originSessionId: 01d8b071-b683-4806-9b45-7401f7b7e97b
+  modified: 2026-09-27T18:07:43.933Z
 ---
 
-## Panel layout
+## Top-center
+`#band-display`: band name + ☰ band-plan toggle; band plan starts **hidden** (`bp-collapsed`).
+Under it, `#antenna-readout` (own line so long text can't push the header under the side panel):
+antenna · height · soil (σ from the dropdown label) · dB @10°/20° from `/antenna/<band>`
+(`updateAntennaReadout`, sequence-guarded against late replies). Unticked → "No antenna model".
 
-Dark glass-morphism panel (top-left, fixed, scrollable, max-height 100vh).
+## Side panel (collapsible `#panel-body`)
+1. Band select (8 bands, boots on 40m — or 20m if a saved hex beam is active) + **Show greyline**
+   (`hf_show_greyline`; not login-locked).
+2. Antenna — "Use antenna" (`#ant-enable`, off by default) dims but doesn't lock; touching any
+   antenna control auto-ticks it (pre-2609.002 changes were silently ignored).
+   - Types: Vertical (true λ/4, no height) | Dipole | Hex Beam (20–10m only) | Elevated GP
+     (Zero Five 10–80m, `egp_zf80`).
+   - Height on its own row (long type names once pushed it off the panel; `.ant-select{min-width:0}`).
+     `setHeightOptions()` swaps lists: 10–100 ft "Height from Ground" vs 4–12 ft "Base Height"
+     (default 8); each list's value remembered (`hf_antenna.height` / `.height_egp`).
+   - Soil `#ant-soil`, 5 choices with S/m in the label, shown for every antenna type.
+   - Hex azimuth applies 400 ms after typing stops; dipole wire orientation N-S/NE-SW/E-W/NW-SE.
+3. Solar indices cards, band-conditions table (hamqsl), WB0Z-only "Refresh Now" (POST /solar/refresh).
+4. My QTH — Grid | Lat/Lon | ZIP.
+Not signed in → QTH + antenna controls are locked (`panel-locked`); band and greyline stay usable.
+Sign-in badge opens login/register (email reset via SES); admins get a user-management panel.
 
-**Header** (sticky):
-- "HF PROPAGATION" title
-- Callsign badge below title — shows stored callsign, click to re-open callsign popup
-- `?` help button → Help/About modal
-- `☰` / `✕` hamburger — toggles `#panel-body.collapsed`
+## localStorage
+`hf_qth_lat/lon/label`, `hf_antenna` {enabled, type, height, height_egp, azimuth, orient, soil},
+`hf_show_greyline`, `hf_session_id`, `hf_callsign`. Auth itself is the `hf_auth` cookie.
+All reads/writes wrapped in try/catch.
 
-**Panel body** (collapsible):
+## Help modal
+Sections: What it does, Open Source (GPL-3.0, github.com/gauthig/propagation), Propagation
+Model, Antenna Model (vertical = λ/4 reference, soil, dipole height, readout), Solar Data
+Sources, Color Scale, Skip Zone, privacy/data sections. Keep it in sync with model changes.
 
-1. **Band dropdown** — 7 bands (80m → 10m), default 20m
-
-   - **Show greyline** checkbox (`#show-greyline`, below band select, not login-locked) —
-     `drawGreyline()` on `#greyline-layer` (SVG above the heat canvas): violet twilight band
-     (78°–93° from the anti-solar point = sun −12°…+3°, matches `_TWILIGHT_CZ`), dashed
-     terminator (drawn as a LineString to avoid map-edge clip lines), yellow sub-solar dot;
-     legend rows `#legend-greyline`/`#legend-sun`. Persisted as localStorage `hf_show_greyline`;
-     redrawn from `updateOverlay()` and every 5 min. Gotcha: the band polygon is
-     `[ring93, reverse(ring78)]` — reversing the 93° ring instead fills the complement.
-
-2. **Antenna section**:
-   - "Use Antenna" checkbox (`#ant-enable`) — **unchecked by default**; dims (but does not lock)
-     the controls when off. Changing any antenna control auto-ticks it (`enableAntenna()`) —
-     before 2609.002 changes were silently ignored while it was unticked.
-   - Settings persist in localStorage `hf_antenna` (`saveAntenna`/`restoreAntenna`); a restored
-     active hex beam makes the page open on 20m instead of the default 40m
-   - Type: Vertical | Dipole | Hex Beam | Elevated GP (Zero Five 10–80m, `egp_zf80`)
-   - Height — hidden for Vertical. `setHeightOptions()` swaps the list: 10–100 ft ("Height from
-     Ground") for dipole/hex, 4–12 ft ("Base Height", default 8) for the elevated GP; each list's
-     last value is remembered separately (`hf_antenna.height` / `.height_egp`)
-   - Soil (`#ant-soil`, 5 choices with S/m in the label) — shown for every antenna type since
-     2609.008, sent as `&soil=` whenever "Use antenna" is ticked
-   - Top-center `#antenna-readout` (own line under the band name): antenna · height · soil ·
-     dB @10°/20° from `/antenna/<band>` (`updateAntennaReadout`, sequence-guarded); unticked shows
-     "No antenna model — reference". Band plan `#band-plan-container` starts `bp-collapsed` (hidden).
-   - Hex Beam: azimuth input (applies 400 ms after typing stops); error shown if band is 80m/60m/40m
-   - Dipole: wire orientation select (N-S, NE-SW, E-W, NW-SE)
-
-3. **Solar Indices** — 2×2 cards (Solar Flux, K-Index, A-Index, Sunspots) with hover tooltips
-
-4. **Band Conditions table** — Good/Fair/Poor pills, day/night, from hamqsl.com
-
-5. **Refresh Now button** — **only visible when callsign is WB0Z**; calls `POST /solar/refresh` with `{callsign: "WB0Z"}` in the body
-
-6. **My QTH** section — Grid | Lat/Lon | ZIP tabs
-
-## Session tracking (localStorage + DynamoDB)
-
-localStorage keys:
-- `hf_session_id` — UUID generated on first visit via `crypto.randomUUID()`, persists across sessions; sent with `/track/callsign` as a reference attribute (not the DynamoDB PK)
-- `hf_callsign` — stored callsign; **this is the DynamoDB primary key** for `hf_users`
-- `hf_qth_lat`, `hf_qth_lon`, `hf_qth_label` — last-set QTH
-
-**Callsign is the stable identity.** The same `hf_users` row is updated no matter which browser, IP address, or device the user connects from — as long as they enter the same callsign. Anonymous visitors (skipped callsign) are not written to DynamoDB.
-
-On every page load:
-1. `initSession()` — restores callsign + QTH from localStorage; if callsign is stored, calls `trackCallsign()` to re-link current session to the callsign row in DynamoDB
-2. `trackVisit()` — POSTs `{callsign}` to `/track/visit`; increments `access_count` in `hf_users`
-
-On callsign save: `trackCallsign(callsign)` → POST `/track/callsign` with `{callsign, session_id}`
-On QTH set: `trackQTH(lat, lon, method)` → POST `/track/qth` with `{callsign, lat, lon, method}`
-
-## JS tracking helpers
-
-```javascript
-function _postTrack(path, payload) {
-  fetch(path, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({session_id: getSessionId(), ...payload}),
-  }).catch(() => {});
-}
-
-function trackVisit() {
-  const callsign = (localStorage.getItem(LS_CALL) || '').toUpperCase();
-  _postTrack('/track/visit', {callsign});
-}
-function trackCallsign(callsign)    { _postTrack('/track/callsign', {callsign}); }
-function trackQTH(lat, lon, method) {
-  const callsign = (localStorage.getItem(LS_CALL) || '').toUpperCase();
-  _postTrack('/track/qth', {callsign, lat, lon, method});
-}
-```
-
-All three are fire-and-forget (`.catch(() => {})`). `_postTrack` is the single fetch wrapper — add headers/retries there.
-
-## Refresh button visibility rule
-```javascript
-function updateRefreshBtn() {
-  const callsign = (localStorage.getItem('hf_callsign') || '').toUpperCase();
-  document.getElementById('refresh-btn').style.display = callsign === 'WB0Z' ? '' : 'none';
-}
-```
-Called from `applyCallsign()` on every callsign change and page load.
-
-`manualRefresh()` POSTs `{callsign}` to `/solar/refresh` so the history row records who triggered the refresh.
-
-## Modals
-
-**Callsign popup** — shown 800 ms after first visit (when `localStorage['hf_callsign'] === null`). "Skip" saves empty string. Clicking the badge re-opens it.
-
-**Help/About modal** — propagation model, antenna model, solar sources, color scale explanation.
-
-## Map overlays
-
-- QTH dot — 7px cyan circle with SVG glow filter
-- Skip zone — gray dashed ring from `estimateSkipKm(freq, sfi)`
-- City labels — ~46 major cities, double-rendered for dark background
-- Heatmap — canvas layer with `blur(9px)` CSS filter, alpha-capped at 57% to keep map visible
+See [[frontend-map]] for drawing, [[api-routes]] for the endpoints.

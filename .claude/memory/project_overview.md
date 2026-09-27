@@ -1,54 +1,38 @@
 ---
 name: project-overview
-description: "Architecture, purpose, tech stack, and deployment of the HF Propagation web app"
-metadata: 
+description: "What the HF Propagation app is, its stack and repo layout, and infra facts that aren't obvious from the code"
+metadata:
   node_type: memory
   type: project
   originSessionId: 01d8b071-b683-4806-9b45-7401f7b7e97b
+  modified: 2026-09-27T18:07:53.608Z
 ---
 
-Flask-based single-page web app that displays a real-time HF radio propagation heatmap on a world map.
+Single-page HF propagation heatmap for hams: pick a band, QTH and antenna; see where the band is
+open now. Live at https://propagation.ggcloud.us, repo github.com/gauthig/propagation (public,
+GPL-3.0). Owner/user: [[user-profile]].
 
-**Why:** Ham radio operators need to know which bands are open and where they can make contacts from their current location (QTH).
+**Stack:** Flask on AWS Lambda (Function URL, Python 3.14, custom WSGI adapter — no Mangum) behind
+CloudFront (+ WAF) with Cloudflare DNS-only CNAME; DynamoDB `hf_solar` + `hf_users`; numpy model;
+D3 frontend in one template. Terraform manages all infra (imported 2026-07-18; local state).
 
-**Production URL:** https://propagation.ggcloud.us
+**Repo layout**
+- `app.py` routes/auth/DynamoDB/WSGI · `propagation.py` model · `templates/index.html` UI
+- `antennas/*.json` — NEC2++/reference gain tables, **packaged with the Lambda**
+- `tools/validate/` ionosonde + WSPR scoring kit · `tools/antenna/` table generators (dev-only)
+- `terraform/` infra · `CLAUDE.md` rules, build script, decision log · `.claude/memory/` shared notes
 
-**Stack:**
-- Backend: Flask (Python), `propagation.py` for numpy-vectorized ionospheric modelling, stdlib `urllib` for solar data (replaced `requests`), `boto3` for DynamoDB
-- Frontend: D3 v7 + d3-geo-projection v4 (Winkel Tripel projection) + topojson-client v3
-- Database: AWS DynamoDB — two tables: `hf_solar` (solar cache + history) and `hf_users` (visitor tracking)
-- Deployment: AWS Lambda (Function URL, Python 3.14) via a custom WSGI adapter in `app.py`
-- CDN / Custom domain: CloudFront distribution in front of the Lambda Function URL
-- World map data: `https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json`
+**Local dev:** `.\venv\Scripts\python.exe app.py`. The venv was recreated 2026-09-27 on
+`C:\Program Files\Python314` (Python moved from `C:\Python314`, which broke the old venv) with
+`requirements.txt` + `requirements-dev.txt` (ruff, boto3). `.claude/launch.json` defines the
+`propagation-local` preview server (port 5000).
 
-**Key files:**
-- `app.py` — Flask routes, DynamoDB helpers, Lambda WSGI handler, background refresh thread (local only)
-- `propagation.py` — solar data fetch (hamqsl.com → NOAA fallback), MUF model, foF2 estimate
-- `templates/index.html` — all HTML/CSS/JS in one file (no build step)
-- `requirements.txt` — `flask`, `numpy` only (boto3 is pre-installed in Lambda runtime); `requirements-dev.txt` — `ruff` (lint, never packaged)
-- `ruff.toml` + `.claude/rules/code-style.md` — house style guide (PEP 8 relaxed, single quotes, aligned assignments OK, 110-col, Ruff lint-only, no auto-formatter)
-- `LOCAL_INSTALL.md` — local dev setup guide
-- `AWS_INSTALL.md` — Lambda + DynamoDB + CloudFront deployment guide
+**Non-obvious infra facts**
+- ACM cert must live in us-east-1; CloudFront origin = bare Function URL hostname with origin
+  request policy AllViewerExceptHostHeader (Lambda rejects a foreign Host). A CNAME straight to the
+  Function URL never works. Cloudflare proxy must stay OFF (grey cloud).
+- IAM role keeps its console name `hf-propagation-role-x6khsb2n` (roles can't be renamed); the WAF
+  web ACL and TLS 1.3 minimum are declared in `cloudfront.tf` — must never show as removals.
+- Real Terraform vars (e.g. `ses_sender_email`) are in gitignored `terraform/terraform.tfvars`.
 
-**DynamoDB tables:**
-- `hf_solar` — PK: `record_id` (String)
-  - `record_id = "current"` row: always present, updated on every refresh, used for O(1) `GetItem` freshness check
-  - `record_id = "<timestamp>Z"` rows: one appended per refresh, oldest pruned when count > 100; includes `refreshed_by` (callsign or "auto")
-- `hf_users` — PK: `callsign` (String). One row per callsign — stable cross-browser identity. `session_id` stored as attribute, not key. Anonymous visitors not tracked.
-
-**IAM required actions:** `GetItem`, `PutItem`, `UpdateItem`, `Scan`, `BatchWriteItem`. Missing `Scan` causes every page load to silently re-fetch solar data (exception in `_get_solar_db` → always returns None).
-
-**CloudFront / custom domain setup:**
-- ACM wildcard cert `*.ggcloud.us` — must be in us-east-1 regardless of Lambda region
-- CloudFront origin: Lambda Function URL (bare hostname, no https://)
-- Origin request policy: **AllViewerExceptHostHeader** — critical, without this Lambda rejects the request (Host header mismatch)
-- Cache policy: default behavior **CachingDisabled**; ordered cache behaviors (**CachingOptimized**, exact paths `/`, `/robots.txt`, `/sitemap.xml`) edge-cache the static routes with TTLs from Flask's `Cache-Control` (600 s / 24 h / 24 h) — since build 2607.004. NEVER use a cache policy with Host in the cache key (UseOriginCacheControlHeaders) — Host gets forwarded and Lambda Function URLs 403; IAM also lacks cloudfront:CreateCachePolicy for custom policies
-- Allowed methods: GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE (POST needed for tracking endpoints)
-- Cloudflare DNS: CNAME `propagation` → CloudFront domain, proxy **OFF** (grey cloud / DNS only) — orange cloud conflicts with CloudFront SSL
-- A bare CNAME directly to the Lambda Function URL does NOT work — Lambda validates the Host header
-
-**How to run locally:** `.\venv\Scripts\python.exe app.py` (must use venv — system Python 3.14 has Flask/Werkzeug incompatibility). Requires boto3 in venv and valid AWS credentials.
-
-**Lambda packaging:** `pip install --platform manylinux_2_28_x86_64 --only-binary=:all: --target lambda_package flask numpy` (numpy MUST be manylinux `.so` wheels, not Windows `.pyd`), copy source + templates, `Compress-Archive` in `$env:TEMP` (OneDrive lock), copy to `lambda.zip`. Handler: `app.handler`. No Mangum — custom WSGI adapter handles Lambda Function URL payload v2.0 directly. Full script in CLAUDE.md rule 1.
-
-**Terraform state:** Live infra imported into local state (terraform/terraform.tfstate, gitignored) on 2026-07-18 via import.local.sh. IAM role keeps its console-generated name hf-propagation-role-x6khsb2n (roles can't be renamed). CloudFront has a WAF web ACL attached — declared in cloudfront.tf, must stay. Real vars live in gitignored terraform/terraform.tfvars.
+Related: [[api-routes]], [[propagation-model]], [[feedback-lambda-packaging]].

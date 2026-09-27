@@ -36,18 +36,7 @@ The `terraform/` directory in this repo contains a complete Terraform configurat
 
 ### First-time setup
 
-**1. Build the Lambda zip** (skip if `lambda.zip` already exists — see [Package the app](#package-the-app)):
-
-```powershell
-# Windows (PowerShell) — run from the repo root
-$pkg = "lambda_package"
-if (Test-Path $pkg) { Remove-Item $pkg -Recurse -Force }
-New-Item -ItemType Directory -Path $pkg | Out-Null
-pip install flask requests -t $pkg --quiet
-Copy-Item app.py, propagation.py $pkg
-Copy-Item templates $pkg\templates -Recurse
-Compress-Archive -Path "$pkg\*" -DestinationPath lambda.zip -Force
-```
+**1. Build the Lambda zip** with the script in [Package the app](#package-the-app). It needs Linux numpy wheels and the `antennas/` tables, so don't hand-roll a simpler zip.
 
 **2. Create your variable file:**
 
@@ -122,15 +111,14 @@ The plan should show zero changes (or only minor tag/description drift). Fix any
 
 ### Updating the app with Terraform
 
-After any code change, rebuild the zip and let Terraform detect the new hash:
+After any code change, bump `APP_VERSION` in `app.py`, rebuild the zip ([Package the app](#package-the-app)), then plan and apply:
 
-```bash
-# from repo root
-Compress-Archive -Path "lambda_package\*" -DestinationPath lambda.zip -Force
-cd terraform && terraform apply
+```powershell
+terraform -chdir=terraform plan -out=tfplan   # expect exactly one in-place change: the Lambda code hash
+terraform -chdir=terraform apply tfplan
 ```
 
-Terraform detects the changed `source_code_hash` and deploys only the Lambda update — no CloudFront invalidation needed.
+Terraform detects the changed `source_code_hash` and deploys only the Lambda update, with no CloudFront invalidation needed. Never apply a plan with unexplained lines. In particular, the WAF web ACL and TLS 1.3 minimum declared in `cloudfront.tf` must never show as removals.
 
 ---
 
@@ -154,20 +142,20 @@ Create both tables in the AWS Console → **DynamoDB** → **Create table**. Use
 Two kinds of rows are written to this table:
 
 - **`record_id = "current"`** — updated on every refresh; used for the fast O(1) freshness check on every page load
-- **`record_id = "<timestamp>Z"`** (e.g. `2026-06-22T14:30:00.123456Z`) — one new row per refresh; oldest rows are automatically deleted when the count exceeds 100
+- **`record_id = "<timestamp>Z"`** (e.g. `2026-06-22T14:30:00.123456Z`) — one history row per refresh, carrying an `expire_at` epoch attribute
 
-Each row includes `refreshed_by` (the callsign that triggered the refresh, or `"auto"` for scheduled/startup fetches).
+**Enable TTL** on the table: DynamoDB → `hf_solar` → **Additional settings** → **Time to Live** → attribute `expire_at`. DynamoDB then deletes history rows after 7 days on its own, with no Scan and no read cost. Terraform sets this up automatically.
 
-### Table 2 — Visitor tracking (`hf_users`)
+Each row includes `refreshed_by`: the callsign that triggered the refresh, or `"auto"` for scheduled/startup fetches.
+
+### Table 2 — Users and accounts (`hf_users`)
 
 | Setting | Value |
 |---|---|
 | Table name | `hf_users` |
 | Partition key | `callsign` (String) |
 
-One row per callsign. The callsign is the stable cross-browser identity — the same row is updated regardless of which browser, IP address, or device a user connects from, as long as they enter the same callsign.
-
-Anonymous visitors (users who skip the callsign prompt) are not written to this table.
+One row per callsign. It is the stable identity for visitor tracking (browser, QTH, visit count) and for accounts: a PBKDF2 password hash, a login token (the `hf_auth` cookie, 30 days), an email for password resets, and `active`/`admin` flags. Anonymous visitors are not written to this table.
 
 Wait for both tables to show status **Active** before deploying.
 
@@ -175,7 +163,7 @@ Wait for both tables to show status **Active** before deploying.
 
 ## IAM policy
 
-Both the Lambda execution role and your local IAM user need the following policy. The `Scan` and `BatchWriteItem` actions are required for the solar history pruning logic.
+Both the Lambda execution role and your local IAM user need the following policy (it matches `terraform/iam.tf`). `Scan` is used by the admin user list; the SES statement is only needed if you enable password-reset emails.
 
 ```json
 {
@@ -187,9 +175,15 @@ Both the Lambda execution role and your local IAM user need the following policy
         "dynamodb:GetItem",
         "dynamodb:PutItem",
         "dynamodb:UpdateItem",
+        "dynamodb:DeleteItem",
         "dynamodb:Scan",
         "dynamodb:BatchWriteItem"
       ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["ses:SendEmail", "ses:SendRawEmail"],
       "Resource": "*"
     }
   ]
@@ -206,43 +200,39 @@ Both the Lambda execution role and your local IAM user need the following policy
 
 ## Package the app
 
-Build a deployment zip that includes the app source and its pip dependencies. `boto3` is **not** included — it is pre-installed in every Lambda Python runtime.
+The deployment zip contains:
+- the app source (`app.py`, `propagation.py`, `templates/`);
+- the antenna gain tables (`antennas/`) — required, or the elevated-GP and soil features fail;
+- Flask and numpy.
 
-**Windows (PowerShell):**
+numpy ships compiled code, so it must be the **Linux (manylinux)** wheel that matches the Lambda runtime, even when you build on Windows or macOS. `boto3` is **not** included, because every Lambda Python runtime already has it. CLAUDE.md rule 1 holds the canonical version of this script (it also bumps `APP_VERSION`).
+
+**Windows (PowerShell)**, from the repo root:
 
 ```powershell
-$root = "C:\path\to\propagation"
-$pkg  = "$root\lambda_package"
-
-if (Test-Path $pkg) { Remove-Item $pkg -Recurse -Force }
-New-Item -ItemType Directory -Path $pkg | Out-Null
-
-pip install flask requests -t $pkg --quiet
-
-Copy-Item "$root\app.py"         "$pkg\app.py"
-Copy-Item "$root\propagation.py" "$pkg\propagation.py"
-Copy-Item "$root\templates"      "$pkg\templates" -Recurse
-
-$zip = "$root\lambda.zip"
-if (Test-Path $zip) { Remove-Item $zip -Force }
-Compress-Archive -Path "$pkg\*" -DestinationPath $zip
-
-Write-Host "Done — $([math]::Round((Get-Item $zip).Length/1MB, 1)) MB"
+if (Test-Path .\lambda_package) { Remove-Item .\lambda_package -Recurse -Force }
+New-Item -ItemType Directory -Path .\lambda_package | Out-Null
+pip install --platform manylinux_2_28_x86_64 --implementation cp --python-version 3.14 `
+            --only-binary=:all: --target .\lambda_package flask numpy --quiet
+Copy-Item app.py, propagation.py .\lambda_package
+Copy-Item templates .\lambda_package\templates -Recurse
+Copy-Item antennas  .\lambda_package\antennas  -Recurse
+Compress-Archive -Path .\lambda_package\* -DestinationPath "$env:TEMP\lambda_build.zip" -Force
+Copy-Item "$env:TEMP\lambda_build.zip" .\lambda.zip -Force   # build in TEMP: OneDrive locks files mid-sync
 ```
 
 **macOS / Linux:**
 
 ```bash
-cd /path/to/propagation
 rm -rf lambda_package && mkdir lambda_package
-pip install flask requests -t lambda_package --quiet
+pip install --platform manylinux_2_28_x86_64 --implementation cp --python-version 3.14 \
+            --only-binary=:all: --target lambda_package flask numpy --quiet
 cp app.py propagation.py lambda_package/
-cp -r templates lambda_package/
-cd lambda_package && zip -r ../lambda.zip . && cd ..
-echo "Done — $(du -sh ../lambda.zip | cut -f1)"
+cp -r templates antennas lambda_package/
+(cd lambda_package && zip -qr ../lambda.zip .)
 ```
 
-The resulting `lambda.zip` should be approximately 3 MB.
+The resulting `lambda.zip` is about 22 MB, mostly numpy. That's well under Lambda's 50 MB direct-upload limit. Check that `lambda_package/numpy/_core/` contains `.so` files. If you see Windows `.pyd` files, the `--platform` flags were dropped, and Lambda will fail with `ImportError: ... _multiarray_umath`.
 
 ---
 
@@ -267,8 +257,12 @@ The resulting `lambda.zip` should be approximately 3 MB.
 
 | Setting | Value | Reason |
 |---|---|---|
-| Memory | 512 MB | Heatmap loop runs ~1,800 trig calls per request |
+| Memory | 512 MB | numpy model computes a full map in ~20 ms; memory also buys CPU on Lambda |
 | Timeout | 30 sec | Allows for slow solar data fetches from hamqsl.com |
+
+### Environment variable (optional)
+
+- `SES_SENDER_EMAIL` — a verified SES sender address for password-reset emails. Without it, sign-in still works but reset emails are not sent. Terraform sets it from `ses_sender_email` in `terraform.tfvars`.
 
 > **Python runtime note:** Use **Python 3.14** — it is the current AWS-recommended Lambda runtime. Python 3.13 is flagged for deprecation by AWS. If you need an older stable version for any reason, use **Python 3.12**.
 
@@ -307,7 +301,7 @@ Request a **wildcard certificate** so any subdomain is covered without a new cer
 3. **Origin type:** Other (Custom origin)
 4. **Protocol:** HTTPS only
 5. **Allowed HTTP methods:** GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE
-6. **Cache policy:** CachingDisabled for the default behavior, then add three cache behaviors with path patterns `/`, `/robots.txt`, and `/sitemap.xml` using **CachingOptimized** (the app sends `Cache-Control` on those routes and CloudFront honors the TTLs). Do **not** use `UseOriginCacheControlHeaders` — it puts the Host header in the cache key, which forwards the viewer Host to the origin, and Lambda Function URLs reject that with 403
+6. **Cache policy:** CachingDisabled for the default behavior. Then add four cache behaviors using **CachingOptimized**, with path patterns `/`, `/robots.txt`, `/sitemap.xml` and `/BingSiteAuth.xml`. The app sends `Cache-Control` on those routes, and CloudFront honors the TTLs. Do **not** use `UseOriginCacheControlHeaders` — it puts the Host header in the cache key, which forwards the viewer Host to the origin, and Lambda Function URLs reject that with 403
 7. **Origin request policy:** `AllViewerExceptHostHeader` — **required**; without this Lambda rejects every request with a host header mismatch
 8. **Alternate domain names:** your custom subdomain (e.g. `propagation.yourdomain.com`)
 9. **Custom SSL certificate:** select the ACM wildcard cert
@@ -358,7 +352,7 @@ When a newer Python version becomes available on Lambda (e.g. 3.14), update in t
 
 1. Lambda console → your function → **Runtime settings** → **Edit**
 2. Select the new runtime from the dropdown → **Save**
-3. Test immediately — open the app and confirm the heatmap loads. `flask` and `requests` are compatible across all Python 3.x releases, but verify on a new major version.
+3. Rebuild the zip with `--python-version` changed to match the new runtime (numpy's compiled wheel is version-specific), redeploy, and confirm the heatmap loads.
 
 > The runtime change takes effect on the next cold start. Warm instances keep the old runtime for up to ~15 minutes.
 
@@ -375,12 +369,7 @@ When a newer Python version becomes available on Lambda (e.g. 3.14), update in t
 
 ## Updating the app
 
-**Terraform:** rebuild the zip, then apply:
-
-```bash
-Compress-Archive -Path "lambda_package\*" -DestinationPath lambda.zip -Force
-cd terraform && terraform apply
-```
+**Terraform:** bump `APP_VERSION`, rebuild the zip ([Package the app](#package-the-app)), then plan and apply, as described in [Updating the app with Terraform](#updating-the-app-with-terraform).
 
 **Manual:** rebuild the zip, then re-upload:
 
