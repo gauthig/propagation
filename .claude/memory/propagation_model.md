@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 67f4cc15-833d-49d0-982f-a2dd3f24bb7c
-  modified: 2026-09-27T15:01:15.366Z
+  modified: 2026-09-27T15:20:25.621Z
 ---
 
 ## Ionospheric model (`propagation.py` → `calculate_muf_map`)
@@ -27,10 +27,19 @@ after 20m showed no US coverage during the day; the old model's foF2 was ~half o
 
 **foF2 at each hop midpoint:**
 ```
-peak = 3.0 + 0.055 * SFI                      # ~8.6 MHz at SFI 100 (mid-lat ionosonde typical)
-cz   = cos(solar zenith) at midpoint, sun lagged 1 h (_F2_LAG_H) → peak ≈ 13:00 local
-foF2 = max(peak * (0.33 + 0.67 * sqrt(max(cz, 0))), 1.0)   # _NIGHT_FLOOR = 0.33
+peak  = 3.0 + 0.055 * SFI                     # ~8.6 MHz at SFI 100 (mid-lat ionosonde typical)
+cz(t) = cos(solar zenith) at midpoint, sun lagged 1 h (_F2_LAG_H) → peak ≈ 13:00 local
+level = max over tau=0..6 h of sqrt(max(cz(t-tau), 0)) * exp(-tau/3)   # _f2_level: slow post-sunset decay
+foF2  = max(peak * (0.33 + 0.67 * level), 1.0)                         # _NIGHT_FLOOR = 0.33
 ```
+(2609.002) The decay term replaced a plain sqrt(cz): before it, 20m closed everywhere
+between 20:00 and 22:00 PDT; now Pacific paths fade out around midnight.
+
+**Greyline (2609.002):** if the QTH and the cell are both in twilight (sun elevation
+−12°…+3°, `_TWILIGHT_CZ`) and both within ±60° lat (`_GREY_MAX_LAT` — polar regions sit in
+twilight for days near equinox and flooded Antarctica with fake openings), MUF ×1.15 and
+strength ×1.3. Heuristic. From DM14 it lights a faint (~0.23) 20m band along the far
+dusk terminator (Middle East / Indian Ocean) at sunrise.
 Declination from day-of-year, so season/latitude come from the zenith angle (no separate lat factor).
 Path MUF = min over hops of foF2 × M. Time uses UTC hour+minute.
 
@@ -96,6 +105,9 @@ Applied multiplicatively after absorption and kp_penalty. Normalized so λ/4 ver
 
 **Known limitations:**
 - Single hop-count threshold (3,500 km) causes small strength steps where n changes
-- No sporadic-E, greyline enhancement, or transequatorial propagation
+- No sporadic-E or transequatorial propagation; greyline is a simple heuristic boost
+- Frontend "Use antenna" gate: before 2609.002 the controls looked active on load while the
+  box was unticked, so antenna changes were silently ignored. Now any antenna control
+  auto-ticks it, settings persist in localStorage `hf_antenna`, and a saved hex beam opens on 20m
 - No noise/SNR model — strength is a probability-like openness score
 - Skip circle uses the median MUF; the map's 1.0–1.35 tail can show faint red inside it

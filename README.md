@@ -99,6 +99,8 @@ Your callsign and QTH are saved in browser localStorage and restored automatical
 
 The dashed circle marks the **skip zone** — too close for reliable skywave on the selected band.
 
+Tick **Show greyline** (under the band selector) to overlay the twilight band in violet, the day/night terminator as a dashed line, and the sub-solar point as a yellow dot. The band is the same one the model's greyline boost uses (sun −12° to +3°). The setting is remembered in the browser.
+
 ### Antenna model
 
 Check **Use antenna** to apply antenna pattern to the heatmap. Unchecked = baseline (no directional weighting).
@@ -244,7 +246,9 @@ Implemented in `propagation.py` with numpy-vectorized grid math; solar data is f
 
 **Path geometry** — paths are split into equal hops of at most 3,500 km, with reflection points at the true great-circle hop midpoints.
 
-**foF2** — daytime peak `3.0 + 0.055×SFI` (~8.6 MHz at SFI 100, typical of mid-latitude ionosondes), shaped by the solar zenith angle at each reflection point, so time of day, season and latitude all count. The F2 layer lags the sun by 1 h, and the night-time floor is 33% of the peak.
+**foF2** — daytime peak `3.0 + 0.055×SFI` (~8.6 MHz at SFI 100, typical of mid-latitude ionosondes), shaped by the solar zenith angle at each reflection point, so time of day, season and latitude all count. The F2 layer lags the sun by 1 h, fades after sunset with a 3 h time constant rather than switching off, and has a night-time floor of 33% of the peak.
+
+**Greyline** — when both ends of a path are in twilight (sun −12° to +3°, within ±60° latitude), the MUF is raised 15% and strength by 30%, a heuristic for the low absorption and terminator tilt of greyline paths.
 
 **MUF** — `foF2 × M-factor`, where the M-factor comes from curved-earth hop geometry (300 km layer, 3° minimum takeoff): ~1 for short hops, ~3.4 for a 3,500 km hop. The weakest hop limits the path.
 

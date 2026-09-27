@@ -21,11 +21,23 @@ Dark glass-morphism panel (top-left, fixed, scrollable, max-height 100vh).
 
 1. **Band dropdown** — 7 bands (80m → 10m), default 20m
 
+   - **Show greyline** checkbox (`#show-greyline`, below band select, not login-locked) —
+     `drawGreyline()` on `#greyline-layer` (SVG above the heat canvas): violet twilight band
+     (78°–93° from the anti-solar point = sun −12°…+3°, matches `_TWILIGHT_CZ`), dashed
+     terminator (drawn as a LineString to avoid map-edge clip lines), yellow sub-solar dot;
+     legend rows `#legend-greyline`/`#legend-sun`. Persisted as localStorage `hf_show_greyline`;
+     redrawn from `updateOverlay()` and every 5 min. Gotcha: the band polygon is
+     `[ring93, reverse(ring78)]` — reversing the 93° ring instead fills the complement.
+
 2. **Antenna section**:
-   - "Use Antenna" checkbox (`#ant-enable`) — **unchecked by default**; greys out controls when off
+   - "Use Antenna" checkbox (`#ant-enable`) — **unchecked by default**; dims (but does not lock)
+     the controls when off. Changing any antenna control auto-ticks it (`enableAntenna()`) —
+     before 2609.002 changes were silently ignored while it was unticked.
+   - Settings persist in localStorage `hf_antenna` (`saveAntenna`/`restoreAntenna`); a restored
+     active hex beam makes the page open on 20m instead of the default 40m
    - Type: Vertical | Dipole | Hex Beam
    - Height (10–100 ft) — hidden when Vertical selected
-   - Hex Beam: azimuth input; error shown if band is 80m/60m/40m
+   - Hex Beam: azimuth input (applies 400 ms after typing stops); error shown if band is 80m/60m/40m
    - Dipole: wire orientation select (N-S, NE-SW, E-W, NW-SE)
 
 3. **Solar Indices** — 2×2 cards (Solar Flux, K-Index, A-Index, Sunspots) with hover tooltips

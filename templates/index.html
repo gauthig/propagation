@@ -50,6 +50,7 @@
     #worldmap  { position:absolute; inset:0; width:100%; height:100%; }
     #heat-canvas { position:absolute; inset:0; pointer-events:none;
                    opacity:0.85; filter:blur(9px); }
+    #greyline-layer { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
 
     /* ── Panel ──────────────────────────────────────────────── */
     #panel {
@@ -96,11 +97,14 @@
     .ant-label { font-size:0.74rem; color:#94a3b8; text-transform:uppercase;
                  letter-spacing:0.05em; white-space:nowrap; }
     #ant-controls { transition:opacity 0.18s; }
-    #ant-controls.ant-off { opacity:0.30; pointer-events:none; user-select:none; }
+    #ant-controls.ant-off { opacity:0.45; }
     #ant-enable-wrap { display:flex; align-items:center; gap:5px; margin-left:auto;
                        font-size:0.74rem; color:#8b949e; cursor:pointer;
                        text-transform:none; letter-spacing:0; font-weight:normal; }
     #ant-enable { accent-color:#38bdf8; cursor:pointer; }
+    #grey-toggle-wrap { display:flex; align-items:center; gap:5px; margin:-4px 0 12px;
+                        font-size:0.74rem; color:#8b949e; cursor:pointer; }
+    #show-greyline { accent-color:#a78bfa; cursor:pointer; }
 
     /* Solar index grid */
     .idx-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px; }
@@ -452,6 +456,7 @@
 <div id="map-wrap">
   <svg id="worldmap"></svg>
   <canvas id="heat-canvas"></canvas>
+  <svg id="greyline-layer"></svg>
 </div>
 
 <!-- ── Floating panel ──────────────────────────────────────── -->
@@ -495,6 +500,10 @@
         <option value="10m">10m (28.0 – 29.7 MHz)</option>
       </select>
     </div>
+    <label id="grey-toggle-wrap" title="Shade the twilight band where greyline propagation is boosted">
+      <input type="checkbox" id="show-greyline" onchange="onGreylineToggle()">
+      Show greyline
+    </label>
 
     <!-- Antenna -->
     <div class="section-label" style="margin-top:2px;display:flex;align-items:center">
@@ -513,7 +522,7 @@
         </select>
         <div id="ant-height-wrap" style="display:flex;align-items:center;gap:6px">
           <span class="ant-label">Height from Ground</span>
-          <select id="ant-height" class="ant-select" style="width:68px" onchange="loadBand(currentBand)">
+          <select id="ant-height" class="ant-select" style="width:68px" onchange="onAntSettingChange()">
             <option value="10">10 ft</option>
             <option value="20">20 ft</option>
             <option value="30" selected>30 ft</option>
@@ -530,7 +539,7 @@
         <div class="ant-row" style="margin-bottom:3px">
           <span class="ant-label">Azimuth (°)</span>
           <input type="number" id="ant-azimuth" class="ant-select" min="0" max="360" value="90"
-                 style="flex:1;text-align:center" onchange="loadBand(currentBand)">
+                 style="flex:1;text-align:center" oninput="onAzimuthInput()">
         </div>
         <div id="hex-error" style="display:none;font-size:0.63rem;color:#f87171;
                                     background:rgba(248,113,113,0.08);border-radius:4px;
@@ -543,7 +552,7 @@
       <div id="ant-dipole-row" style="display:none;margin-bottom:7px">
         <div class="ant-row" style="margin-bottom:0">
           <span class="ant-label">Wire</span>
-          <select id="ant-dipole-orient" class="ant-select" style="flex:1" onchange="loadBand(currentBand)">
+          <select id="ant-dipole-orient" class="ant-select" style="flex:1" onchange="onAntSettingChange()">
             <option value="0">N–S wire  (signal → E/W)</option>
             <option value="45">NE–SW wire  (signal → NW/SE)</option>
             <option value="90">E–W wire  (signal → N/S)</option>
@@ -647,6 +656,14 @@
     <svg width="22" height="10"><line x1="0" y1="5" x2="22" y2="5" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4 3"/></svg>
     <span>Skip zone</span>
   </div>
+  <div class="legend-row" id="legend-greyline" style="display:none">
+    <svg width="22" height="10"><rect x="0" y="1" width="22" height="8" fill="#a78bfa" fill-opacity="0.35"/><line x1="0" y1="5" x2="22" y2="5" stroke="#c4b5fd" stroke-width="1.2" stroke-dasharray="4 3"/></svg>
+    <span>Greyline (twilight)</span>
+  </div>
+  <div class="legend-row" id="legend-sun" style="display:none">
+    <svg width="22" height="10"><circle cx="11" cy="5" r="4" fill="#fde047"/></svg>
+    <span>Sun overhead</span>
+  </div>
 </div>
 
 <!-- ── Loading overlay ──────────────────────────────────────── -->
@@ -675,6 +692,8 @@
         <li><b>MUF</b> = foF2 × M-factor, where the M-factor comes from curved-earth hop geometry: ~1 for short hops, rising to ~3.4 for a 3,500 km hop. Longer paths are split into equal hops.</li>
         <li>Multi-hop paths are evaluated at each reflection point along the great-circle path; the <b>weakest hop</b> limits the path MUF.</li>
         <li>The nominal MUF is a <b>median estimate</b> — the band is open ~50 % of the time at exactly that frequency. The strength curve extends 35 % above the MUF to model natural foF2 variability.</li>
+        <li>After sunset the F2 layer <b>fades gradually</b> (about a 3-hour time constant) rather than switching off, so bands like 20m stay open into the evening toward the Pacific.</li>
+        <li><b>Greyline:</b> when both your QTH and the far end are in twilight, the path gets a modest boost — less absorption and a slightly higher MUF along the terminator. Tick <b>Show greyline</b> to see the twilight band (violet), the terminator (dashed line) and the point where the sun is overhead (yellow dot). When your QTH is inside the band, the far parts of the band are your greyline paths.</li>
         <li><b>D-layer absorption</b> weakens each hop in daylight — strongest at low frequencies and high sun. This is why 80m/40m fade over long daytime paths while 20m stays open.</li>
         <li>Geomagnetic activity (K-index) applies a uniform penalty to all paths.</li>
       </ul>
@@ -1294,6 +1313,65 @@ function updateOverlay() {
       .attr('fill','#38bdf8').attr('stroke','#fff').attr('stroke-width', 2)
       .attr('filter','url(#qth-glow)');
   }
+  drawGreyline();
+}
+
+// ── Greyline overlay ──────────────────────────────────────────────────────
+const LS_GREY = 'hf_show_greyline';
+
+// Sub-solar point [lon, lat] — same declination/hour-angle math as the server model
+function subsolarPoint() {
+  const now  = new Date();
+  const utcH = now.getUTCHours() + now.getUTCMinutes() / 60;
+  const doy  = Math.floor((now - Date.UTC(now.getUTCFullYear(), 0, 0)) / 86400000);
+  const decl = -23.44 * Math.cos(2 * Math.PI / 365 * (doy + 10));
+  const lon  = ((((12 - utcH) * 15) % 360) + 540) % 360 - 180;
+  return [lon, decl];
+}
+
+function drawGreyline() {
+  const layer = d3.select('#greyline-layer');
+  layer.selectAll('*').remove();
+  const on = document.getElementById('show-greyline').checked;
+  document.getElementById('legend-greyline').style.display = on ? '' : 'none';
+  document.getElementById('legend-sun').style.display      = on ? '' : 'none';
+  if (!on || !geoPath) return;
+
+  const [sLon, sLat] = subsolarPoint();
+  const anti = [sLon > 0 ? sLon - 180 : sLon + 180, -sLat];
+
+  // Twilight band used by the model's greyline boost: sun elevation −12°…+3°,
+  // i.e. 78°…93° from the anti-solar point. The 78° ring is reversed to make it a hole;
+  // reversing the 93° ring instead fills the complement.
+  const outer = d3.geoCircle().center(anti).radius(93)().coordinates[0];
+  const inner = d3.geoCircle().center(anti).radius(78)().coordinates[0].slice().reverse();
+  layer.append('path').datum({ type:'Polygon', coordinates:[outer, inner] })
+    .attr('d', geoPath).attr('fill', '#a78bfa').attr('fill-opacity', 0.24).attr('stroke', 'none');
+
+  // Terminator (sun on the horizon) — drawn as a line so map-edge clipping adds no border
+  const ring = d3.geoCircle().center(anti).radius(90)().coordinates[0];
+  layer.append('path').datum({ type:'LineString', coordinates: ring })
+    .attr('d', geoPath).attr('fill', 'none').attr('stroke', '#c4b5fd')
+    .attr('stroke-width', 1.3).attr('stroke-dasharray', '6 4').attr('opacity', 0.9);
+
+  const pt = projection([sLon, sLat]);
+  if (pt) {
+    layer.append('circle').attr('cx', pt[0]).attr('cy', pt[1]).attr('r', 9)
+      .attr('fill', '#fde047').attr('opacity', 0.25);
+    layer.append('circle').attr('cx', pt[0]).attr('cy', pt[1]).attr('r', 5)
+      .attr('fill', '#fde047').attr('stroke', '#a16207').attr('stroke-width', 1);
+  }
+}
+
+function onGreylineToggle() {
+  try { localStorage.setItem(LS_GREY, document.getElementById('show-greyline').checked ? '1' : '0'); } catch {}
+  drawGreyline();
+}
+
+function restoreGreyline() {
+  let saved = null;
+  try { saved = localStorage.getItem(LS_GREY); } catch {}
+  document.getElementById('show-greyline').checked = saved === '1';
 }
 
 // Mirrors the server model in propagation.py — keep the constants in sync.
@@ -1303,9 +1381,14 @@ function estimateFoF2(lat, lon, sfi) {
   const utcH = now.getUTCHours() + now.getUTCMinutes() / 60;
   const doy  = Math.floor((now - Date.UTC(now.getUTCFullYear(), 0, 0)) / 86400000);
   const decl = -23.44 * Math.cos(2 * Math.PI / 365 * (doy + 10)) * rad;
-  const ha   = ((((utcH + lon / 15 - 1) % 24) + 24) % 24 - 12) * 15 * rad;   // 1 h F2 lag
-  const cz   = Math.sin(lat * rad) * Math.sin(decl) + Math.cos(lat * rad) * Math.cos(decl) * Math.cos(ha);
-  return Math.max(1.0, (3.0 + 0.055 * sfi) * (0.33 + 0.67 * Math.sqrt(Math.max(cz, 0))));
+  // F2 lags the sun 1 h and decays with a 3 h time constant after sunset (6 h look-back)
+  let level = 0;
+  for (let tau = 0; tau <= 6; tau++) {
+    const ha = ((((utcH - tau + lon / 15 - 1) % 24) + 24) % 24 - 12) * 15 * rad;
+    const cz = Math.sin(lat * rad) * Math.sin(decl) + Math.cos(lat * rad) * Math.cos(decl) * Math.cos(ha);
+    level = Math.max(level, Math.sqrt(Math.max(cz, 0)) * Math.exp(-tau / 3));
+  }
+  return Math.max(1.0, (3.0 + 0.055 * sfi) * (0.33 + 0.67 * level));
 }
 
 // Curved-earth MUF M-factor for one F2 hop (300 km layer, 3° minimum takeoff angle)
@@ -1444,20 +1527,82 @@ function moveTip(event) {
 function hideTip() { document.getElementById('tip-box').style.display = 'none'; }
 
 // ── Antenna controls ──────────────────────────────────────────────────────
-function onAntEnableChange() {
+const LS_ANT = 'hf_antenna';
+let _azTimer = null;
+
+function syncAntEnabledStyle() {
   const enabled = document.getElementById('ant-enable').checked;
   document.getElementById('ant-controls').classList.toggle('ant-off', !enabled);
-  document.getElementById('hex-error').style.display = 'none';
-  loadBand(currentBand);
 }
 
-function onAntennaChange() {
+// Touching any antenna control turns the antenna model on — otherwise the change
+// would be silently ignored while "Use antenna" is unticked.
+function enableAntenna() {
+  const box = document.getElementById('ant-enable');
+  if (box.checked) return;
+  box.checked = true;
+  syncAntEnabledStyle();
+}
+
+function showAntennaRows() {
   const ant = document.getElementById('ant-type').value;
   document.getElementById('ant-beam-row').style.display    = ant === 'hex_beam' ? '' : 'none';
   document.getElementById('ant-dipole-row').style.display  = ant === 'dipole'   ? '' : 'none';
   document.getElementById('ant-height-wrap').style.display = ant === 'vertical' ? 'none' : '';
+}
+
+function saveAntenna() {
+  try {
+    localStorage.setItem(LS_ANT, JSON.stringify({
+      enabled: document.getElementById('ant-enable').checked,
+      type:    document.getElementById('ant-type').value,
+      height:  document.getElementById('ant-height').value,
+      azimuth: document.getElementById('ant-azimuth').value,
+      orient:  document.getElementById('ant-dipole-orient').value,
+    }));
+  } catch {}
+}
+
+function restoreAntenna() {
+  let s = null;
+  try { s = JSON.parse(localStorage.getItem(LS_ANT)); } catch {}
+  if (s) {
+    const set = (id, v) => { if (v != null && v !== '') document.getElementById(id).value = v; };
+    set('ant-type', s.type);
+    set('ant-height', s.height);
+    set('ant-azimuth', s.azimuth);
+    set('ant-dipole-orient', s.orient);
+    document.getElementById('ant-enable').checked = !!s.enabled;
+  }
+  showAntennaRows();
+  syncAntEnabledStyle();
+}
+
+function onAntEnableChange() {
+  syncAntEnabledStyle();
   document.getElementById('hex-error').style.display = 'none';
+  saveAntenna();
   loadBand(currentBand);
+}
+
+function onAntennaChange() {
+  showAntennaRows();
+  document.getElementById('hex-error').style.display = 'none';
+  onAntSettingChange();
+}
+
+function onAntSettingChange() {
+  enableAntenna();
+  saveAntenna();
+  loadBand(currentBand);
+}
+
+// Apply a typed azimuth once typing pauses; ignore the empty field mid-edit
+function onAzimuthInput() {
+  clearTimeout(_azTimer);
+  _azTimer = setTimeout(() => {
+    if (!isNaN(parseFloat(document.getElementById('ant-azimuth').value))) onAntSettingChange();
+  }, 400);
 }
 
 // ── Help modal ────────────────────────────────────────────────────────────
@@ -2112,8 +2257,9 @@ function hidePrivacy(e)   {
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────
-// Hide height selector initially (vertical is default, height not applicable)
-document.getElementById('ant-height-wrap').style.display = 'none';
+restoreAntenna();      // saved antenna settings; also sets row visibility and dimmed state
+restoreGreyline();
+setInterval(drawGreyline, 300000);   // the terminator moves ~1.25° every 5 min
 updateControlsLock();   // lock controls until auth check completes
 
 try {
@@ -2127,7 +2273,9 @@ initSession();   // restore QTH from localStorage
 initAuth();      // check auth cookie → set currentUser, update badge + admin panel
 trackVisit();    // log visit to DynamoDB
 updateSolar();
-loadBand('40m');
+// A restored hex beam isn't valid on 40m — open on 20m instead of showing the hex error
+const hexActive = document.getElementById('ant-enable').checked && document.getElementById('ant-type').value === 'hex_beam';
+loadBand(hexActive ? '20m' : '40m');
 setInterval(function() { updateSolar(); loadBand(currentBand); }, 900000);
 </script>
 </body>

@@ -178,6 +178,12 @@ _MAX_HOP_KM   = 3500.0   # longest practical single F2 hop; longer paths split i
 _MIN_ELEV_DEG = 3.0      # lowest useful takeoff angle (terrain/ground losses below this)
 _F2_LAG_H     = 1.0      # F2 ionization lags the sun ~1 h → daily foF2 peak near 13:00 local
 _NIGHT_FLOOR  = 0.33     # night-time foF2 as a fraction of the daytime peak
+_DECAY_H      = 3.0      # post-sunset F2 decay time constant (h) — ionization fades, not switches off
+_DECAY_LOOK_H = 6        # hours of look-back for that decay
+_TWILIGHT_CZ  = (-0.21, 0.05)   # sun elevation −12°…+3° → greyline band
+_GREY_MUF     = 1.15     # greyline MUF lift (ionospheric tilt along the terminator)
+_GREY_GAIN    = 1.3      # greyline strength gain (little D-layer absorption at either end)
+_GREY_MAX_LAT = 60.0     # polar regions sit in twilight for days near equinox — not a greyline
 _GYRO_MHZ     = 1.4      # electron gyrofrequency term in the D-layer absorption formula
 _ABS_SCALE_DB = 40.0     # absorption dB that cuts strength by 10× (strength ∝ 10^(-dB/40))
 
@@ -198,6 +204,15 @@ def _cos_zenith(lat_r, lon_d, utc_h, decl, lag_h=0.0):
     """cos(solar zenith angle) at lat (radians) / lon (degrees), optionally lagged by lag_h hours."""
     hour_angle = np.radians(((utc_h + lon_d / 15.0 - lag_h) % 24 - 12) * 15)
     return np.sin(lat_r) * np.sin(decl) + np.cos(lat_r) * np.cos(decl) * np.cos(hour_angle)
+
+
+def _f2_level(lat_r, lon_d, utc_h, decl):
+    """0–1 F2 ionization level from the lagged sun, decaying slowly (not instantly) after sunset."""
+    level = np.zeros(np.shape(lat_r))
+    for tau in range(_DECAY_LOOK_H + 1):
+        cz    = np.maximum(_cos_zenith(lat_r, lon_d, utc_h - tau, decl, _F2_LAG_H), 0.0)
+        level = np.maximum(level, np.sqrt(cz) * np.exp(-tau / _DECAY_H))
+    return level
 
 
 def _hop_geometry(hop_km):
@@ -284,13 +299,20 @@ def calculate_muf_map(station_lat, station_lon, freq_min, freq_max, solar_indice
         active     = i < n_hops
         frac       = np.minimum((2 * i + 1) / (2.0 * n_hops), 1.0)
         mlat, mlon = _gc_point(la1, lo1, la2, lo2, delta, frac)
-        cz_f2      = np.maximum(_cos_zenith(mlat, mlon, utc_h, decl, _F2_LAG_H), 0.0)
-        hop_fof2   = np.maximum(fof2_peak * (_NIGHT_FLOOR + (1 - _NIGHT_FLOOR) * np.sqrt(cz_f2)), 1.0)
+        f2_level   = _f2_level(mlat, mlon, utc_h, decl)
+        hop_fof2   = np.maximum(fof2_peak * (_NIGHT_FLOOR + (1 - _NIGHT_FLOOR) * f2_level), 1.0)
         fof2       = np.where(active, np.minimum(fof2, hop_fof2), fof2)
         cz_d       = np.maximum(_cos_zenith(mlat, mlon, utc_h, decl), 0.0)
         loss_db   += np.where(active, abs_coeff * cz_d ** 0.75 * m_factor, 0.0)
 
-    muf   = fof2 * m_factor
+    # ── Greyline: both ends in twilight → higher MUF, little absorption ───────
+    tw_lo, tw_hi = _TWILIGHT_CZ
+    cz_qth  = _cos_zenith(la1, station_lon, utc_h, decl)
+    cz_cell = _cos_zenith(la2, LON, utc_h, decl)
+    grey    = ((tw_lo <= cz_qth <= tw_hi) & (abs(station_lat) <= _GREY_MAX_LAT)
+               & (cz_cell >= tw_lo) & (cz_cell <= tw_hi) & (np.abs(LAT) <= _GREY_MAX_LAT))
+
+    muf   = fof2 * m_factor * np.where(grey, _GREY_MUF, 1.0)
     ratio = freq_center / muf
 
     # ── Strength curve (see model notes) ──────────────────────────────────────
@@ -300,7 +322,7 @@ def calculate_muf_map(station_lat, station_lon, freq_min, freq_max, solar_indice
     #   Clip the power base ≥0 so the inactive branch never yields NaN.
     above    = np.power(np.clip((1.35 - ratio) / 0.35, 0, None), 0.7)
     strength = np.select([ratio > 1.35, ratio > 1.0], [0.0, above], default=1.0)
-    strength = strength * 10 ** (-loss_db / _ABS_SCALE_DB)
+    strength = strength * 10 ** (-loss_db / _ABS_SCALE_DB) * np.where(grey, _GREY_GAIN, 1.0)
     strength = np.clip(strength * kp_penalty, 0.0, 1.0)
 
     # ── Antenna factor (vectorized) ───────────────────────────────────────────

@@ -28,7 +28,7 @@ log = logging.getLogger('hf')
 # ── Configuration ──────────────────────────────────────────────────────────────
 # Version format YYMM.### — ### increments every build and resets to 001 at the
 # start of each month (see CLAUDE.md packaging rule).
-APP_VERSION = '2609.001'
+APP_VERSION = '2609.002'
 SITE_URL    = 'https://propagation.ggcloud.us'  # canonical origin — used by robots.txt / sitemap.xml
 
 DEFAULT_LAT = 39.8
