@@ -177,7 +177,7 @@ _F2_HEIGHT    = 300.0    # km — nominal F2 reflection height
 _MAX_HOP_KM   = 3500.0   # longest practical single F2 hop; longer paths split into equal hops
 _MIN_ELEV_DEG = 3.0      # lowest useful takeoff angle (terrain/ground losses below this)
 # Diurnal foF2 constants below were fitted to 16,200 GIRO ionosonde soundings (12 stations,
-# Sep 20–27 2026, SFI 101–121): mid-latitude RMSE 1.26 → 0.83 MHz, tropics 3.11 → 1.70 MHz.
+# Sep 20–27 2026, SFI 101–121): mid-latitude RMSE 1.26 → 0.83 MHz. Re-check with tools/validate/.
 _FOF2_A       = 2.85     # daytime foF2 peak = A + B·SFI  (≈ 8.1 MHz at SFI 100, mid-latitude)
 _FOF2_B       = 0.052
 _F2_LAG_H     = 1.5      # F2 ionization lags the sun → daily foF2 peak mid-afternoon
@@ -185,8 +185,15 @@ _F2_RISE_ELEV = -20.0    # sun elevation (deg) at which the F2 layer starts ioni
                          # is sunlit well before ground sunrise, so foF2 climbs from first light
 _NIGHT_FLOOR  = 0.43     # night-time foF2 as a fraction of the daytime peak
 _DECAY_H      = 2.0      # post-sunset F2 decay time constant (h) at mid-latitudes
-_EQ_BOOST     = 0.4      # equatorial-anomaly lift on the peak: ×(1 + 0.4·cos(lat)^24)
-_EQ_DECAY_H   = 6.0      # extra post-sunset decay time near the equator: +6·cos(lat)^24 h
+# Equatorial terms re-fitted on 29 ionosondes (Sep 20–27 2026) using *geomagnetic* latitude —
+# the anomaly follows the magnetic equator (≈10° S of the geographic one over Brazil):
+# tropics RMSE 2.34 → 1.82 MHz, evening bias −2.1 → −0.3 MHz, mid-latitudes unchanged.
+_EQ_WIDTH_EXP = 8        # equatorial weight = cos(geomagnetic lat)^8 (~0.5 at 24°, ~0.1 at 41°)
+_EQ_BOOST     = 0.4      # equatorial-anomaly lift on the peak: ×(1 + 0.4·weight)
+_EQ_DECAY_H   = 4.0      # extra post-sunset decay time near the magnetic equator: +4·weight h
+_EQ_EVENING   = 0.3      # pre-reversal enhancement: foF2 ×(1 + 0.3·weight) around 20:00 local …
+_EQ_EVE_LT    = 20.0     # … centred here (local solar hour) …
+_EQ_EVE_W     = 2.5      # … Gaussian half-width in hours
 _POLAR_CUT    = 0.20     # high-latitude (trough/auroral) peak reduction, ramped in from 45° to 65° |lat|
 _DECAY_LOOK_H = 10       # hours of look-back for the decay
 _MUF_SIGMA    = 0.14     # day-to-day σ of ln(foF2) around the median (measured; 10–90 % = 0.85–1.18×)
@@ -226,15 +233,15 @@ def _cos_zenith(lat_r, lon_d, utc_h, decl, lag_h=0.0):
     return np.sin(lat_r) * np.sin(decl) + np.cos(lat_r) * np.cos(decl) * np.cos(hour_angle)
 
 
-def _equatorial(lat_r):
-    """0–1 weight that is ~1 inside ±15° of the equator and negligible beyond ~35°."""
-    return np.cos(lat_r) ** 24
+def _equatorial(lat_r, lon_d):
+    """0–1 weight: ~1 at the geomagnetic equator, ~0.5 at 24°, ~0.1 at 41° geomagnetic latitude."""
+    return np.cos(np.radians(_mag_lat(lat_r, lon_d))) ** _EQ_WIDTH_EXP
 
 
 def _f2_level(lat_r, lon_d, utc_h, decl):
     """0–1 F2 ionization level from the lagged sun, decaying slowly (not instantly) after sunset."""
     s0    = np.sin(np.radians(_F2_RISE_ELEV))
-    decay = _DECAY_H + _EQ_DECAY_H * _equatorial(lat_r)
+    decay = _DECAY_H + _EQ_DECAY_H * _equatorial(lat_r, lon_d)
     level = np.zeros(np.shape(lat_r))
     for tau in range(_DECAY_LOOK_H + 1):
         cz    = _cos_zenith(lat_r, lon_d, utc_h - tau, decl, _F2_LAG_H)
@@ -245,9 +252,14 @@ def _f2_level(lat_r, lon_d, utc_h, decl):
 
 def _fof2(lat_r, lon_d, utc_h, decl, sfi):
     """Median foF2 (MHz) at a point — the fitted diurnal/latitude model."""
+    eq    = _equatorial(lat_r, lon_d)
     polar = np.clip((np.abs(np.degrees(lat_r)) - 45.0) / 20.0, 0.0, 1.0)
-    peak  = (_FOF2_A + _FOF2_B * sfi) * (1 + _EQ_BOOST * _equatorial(lat_r)) * (1 - _POLAR_CUT * polar)
-    return np.maximum(peak * (_NIGHT_FLOOR + (1 - _NIGHT_FLOOR) * _f2_level(lat_r, lon_d, utc_h, decl)), 1.0)
+    peak  = (_FOF2_A + _FOF2_B * sfi) * (1 + _EQ_BOOST * eq) * (1 - _POLAR_CUT * polar)
+    fof2  = peak * (_NIGHT_FLOOR + (1 - _NIGHT_FLOOR) * _f2_level(lat_r, lon_d, utc_h, decl))
+    # Pre-reversal enhancement: the equatorial anomaly intensifies for a few hours after sunset
+    dt_eve = ((utc_h + lon_d / 15.0 - _EQ_EVE_LT + 12) % 24) - 12
+    fof2   = fof2 * (1 + _EQ_EVENING * eq * np.exp(-0.5 * (dt_eve / _EQ_EVE_W) ** 2))
+    return np.maximum(fof2, 1.0)
 
 
 def _p_open(ratio):

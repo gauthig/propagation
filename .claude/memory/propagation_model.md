@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 67f4cc15-833d-49d0-982f-a2dd3f24bb7c
-  modified: 2026-09-27T16:09:26.359Z
+  modified: 2026-09-27T16:40:34.292Z
 ---
 
 ## Ionospheric model (`propagation.py` → `calculate_muf_map`)
@@ -27,14 +27,16 @@ after 20m showed no US coverage during the day; the old model's foF2 was ~half o
 
 **foF2 at each hop midpoint (`_fof2`, 2609.003 — fitted to ionosondes, see below):**
 ```
-eq    = cos(lat)^24                              # _equatorial: ~1 inside ±15°, ~0 beyond 35°
+eq    = cos(geomag lat)^8                        # _equatorial(lat_r, lon_d) — 2609.005 (was cos(geo lat)^24)
 polar = clip((|lat| - 45) / 20, 0, 1)
 peak  = (2.85 + 0.052*SFI) * (1 + 0.4*eq) * (1 - 0.2*polar)
 cz(t) = cos(solar zenith) at midpoint, sun lagged 1.5 h (_F2_LAG_H)
 lit   = clip((cz - sin(-20°)) / (1 - sin(-20°)), 0)   # _F2_RISE_ELEV: F2 lit before ground sunrise
-level = max over tau=0..10 h of sqrt(lit(t-tau)) * exp(-tau / (2 + 6*eq))
-foF2  = max(peak * (0.43 + 0.57*level), 1.0)          # _NIGHT_FLOOR = 0.43
+level = max over tau=0..10 h of sqrt(lit(t-tau)) * exp(-tau / (2 + 4*eq))
+foF2  = max(peak * (0.43 + 0.57*level) * (1 + 0.3*eq*exp(-½((LT-20)/2.5)²)), 1.0)   # pre-reversal term
 ```
+2609.005 tropical re-fit (29 ionosondes): tropics RMSE 2.34→1.82 MHz; WSPR neutral. Pacific paths now
+brighter than WSPR hearing supports → long multi-hop path loss is the next missing piece.
 History: 2609.001 sqrt(cz) only (20m closed 20–22 PDT); 2609.002 added 3 h decay/floor 0.33.
 
 **Greyline (2609.002):** if the QTH and the cell are both in twilight (sun elevation
