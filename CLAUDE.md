@@ -65,6 +65,7 @@ compact CSS, camelCase JS). Terraform: `terraform fmt` after edits.
 ---
 
 ## Decisions log
+- 2026-09-27 — Propagation model rework (2609.001) — 20m showed no US coverage by day because foF2 was ~half of real (`0.01·SFI+3.5`); now foF2 peak `3.0+0.055·SFI` shaped by solar zenith angle at great-circle hop midpoints (1 h F2 lag, night floor 0.33), curved-earth M-factor with 3,500 km hops, George–Bradley D-layer absorption replacing the "below FOT = weak" branch; skip circle mirrors the same math per bearing — rejected night floor 0.38 (red wash over whole night side) and 0.30 (killed 40m night short paths); constants calibrated to typical band behaviour, not yet to ionosonde/VOACAP data
 <!-- Append after each major decision. Newest first. -->
 - 2026-07-18 — SEO enablement + edge caching — meta description/OG/JSON-LD in index.html, new `/robots.txt` + `/sitemap.xml` routes; CloudFront ordered cache behaviors (CachingOptimized, exact paths `/`, `/robots.txt`, `/sitemap.xml`) over the CachingDisabled default, TTLs from Flask's Cache-Control (`/` 10 min, robots/sitemap 24 h) — rejected UseOriginCacheControlHeaders (Host in cache key is forwarded → Lambda Function URL 403, caused a brief outage before rollback) and a custom cache policy (IAM lacks cloudfront:CreateCachePolicy)
 - 2026-07-18 — Terraform is the deploy path (live infra imported into local state; apply ships lambda.zip) — replaces manual console zip upload — rejected recreating IAM with clean names (roles can't be renamed; adopted console-generated names instead)
@@ -76,7 +77,9 @@ compact CSS, camelCase JS). Terraform: `terraform fmt` after edits.
 
 ## Known gotchas
 - OneDrive locks `lambda.zip` mid-sync — build the zip in `$env:TEMP`, then copy into the repo; on file-lock errors wait ~30 s for sync and retry.
-- Local runs must use `.\venv\Scripts\python.exe` — system Python 3.14 has a Flask/Werkzeug incompatibility.
+- Local runs must use `.\venv\Scripts\python.exe` — system Python 3.14 has a Flask/Werkzeug incompatibility. Rebuild the venv with `pip install -r requirements.txt -r requirements-dev.txt` (dev file includes `boto3`, needed locally but provided by Lambda). If Python moves, the venv breaks with "did not find executable" — recreate it.
+- `/` is served with `Cache-Control: max-age=600`, and the local server caches templates — after editing `templates/index.html`, restart the server and load `/?nocache=N` or you'll test the old page.
+- The skip circle JS (`estimateFoF2`/`hopMFactor` in index.html) mirrors constants in `propagation.py` — change both together.
 - numpy in `lambda.zip` must be **manylinux** wheels (`.so` files), never Windows `.pyd` — see packaging rule below.
 - Broad `except Exception` around DynamoDB/SES/solar calls is intentional fail-soft design, not sloppiness.
 - `boto3` is imported in `app.py` but deliberately absent from `requirements.txt` — the Lambda runtime provides it.

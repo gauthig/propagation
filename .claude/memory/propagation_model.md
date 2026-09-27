@@ -1,43 +1,58 @@
 ---
 name: propagation-model
-description: "foF2/MUF model, antenna factor model, band freqs, known limitations"
+description: "foF2/MUF model, absorption, antenna factor model, band freqs, known limitations"
 metadata: 
   node_type: memory
   type: project
   originSessionId: 67f4cc15-833d-49d0-982f-a2dd3f24bb7c
+  modified: 2026-09-27T15:01:15.366Z
 ---
 
-## Ionospheric model (`propagation.py`)
+## Ionospheric model (`propagation.py` → `calculate_muf_map`)
 
-Empirical F2-layer model — not ray-tracing (not VOACAP).
+Empirical F2-layer model — not ray-tracing (not VOACAP). Reworked 2026-09-27 (v2609.001)
+after 20m showed no US coverage during the day; the old model's foF2 was ~half of real.
 
 **Solar data sources (with fallback):**
 1. `http://www.hamqsl.com/solarxml.php` — SFI, K-index, A-index, SSN, band conditions (HTTP only, not HTTPS)
 2. NOAA SWPC JSON endpoints — fallback if hamqsl unreachable
 
-**foF2 estimate (`_estimate_fof2`):**
-```
-base       = 0.01 * SFI + 3.5        # ~4.5 MHz at SFI=100
-lat_factor = cos(lat)^0.4            # equatorial F2 is thicker
-time_factor= 0.45 + 0.55 * max(0, cos(radians((local_hour - 14) * 15)))
-foF2       = base * lat_factor * time_factor  (min 1.0)
-```
-Peaks at 14:00 local solar time. Night floor is 45% of daytime peak.
+**Path geometry:**
+- Grid: 3° lat/lon, -75..+78 lat, -180..+177 lon; cells < 150 km from QTH dropped
+- Hops: `n = ceil(dist / 3500 km)`, equal-length hops
+- Reflection points = true great-circle hop midpoints (`_gc_point`)
+- `_hop_geometry(hop_km)` — curved earth, 300 km F2 layer, min takeoff 3° → returns
+  takeoff angle (also used by the antenna elevation pattern) and M-factor
+  (~1.0 short hops → ~3.37 at 3,500 km)
 
-**MUF and strength per grid point:**
-- Grid: 3° lat/lon steps, -75° to +78° lat, -180° to +177° lon
-- Skip zone: points within 150 km excluded
-- Multi-hop: foF2 evaluated at multiple path points; **weakest hop** sets path MUF:
-  - < 2,000 km (1 hop): midpoint only; M-factor 3.2
-  - 2,000–5,000 km (2 hops): 1/3 and 2/3 points; M-factor 3.7
-  - > 5,000 km (3 hops): 1/4, 1/2, 3/4 points; M-factor 4.1
-- Strength curve (probabilistic, not hard cutoff):
-  - ratio = freq / MUF
-  - ratio > 1.35 or < 0.45 → strength 0.0 (closed)
-  - ratio 0.85–1.00 → strength 1.0 (prime FOT-to-MUF range)
-  - ratio 1.00–1.35 → `((1.35 - ratio) / 0.35)^0.7` (above MUF, falling)
-  - ratio 0.45–0.85 → `((ratio - 0.45) / 0.40)^1.5` (below FOT, rising)
-- K-index penalty: `kp_penalty = max(0, 1 - (K/9) * 0.75)` applied to all paths
+**foF2 at each hop midpoint:**
+```
+peak = 3.0 + 0.055 * SFI                      # ~8.6 MHz at SFI 100 (mid-lat ionosonde typical)
+cz   = cos(solar zenith) at midpoint, sun lagged 1 h (_F2_LAG_H) → peak ≈ 13:00 local
+foF2 = max(peak * (0.33 + 0.67 * sqrt(max(cz, 0))), 1.0)   # _NIGHT_FLOOR = 0.33
+```
+Declination from day-of-year, so season/latitude come from the zenith angle (no separate lat factor).
+Path MUF = min over hops of foF2 × M. Time uses UTC hour+minute.
+
+**D-layer absorption (per hop, summed):**
+`loss_dB = 677·(1+0.0037·SSN)·cos(χ)^0.75 / (f+1.4)² · M` (χ unlagged) →
+strength × 10^(−loss/40). This is what fades 80m/40m on long daytime paths.
+
+**Strength:** ratio = f/MUF → ≤1.0 → 1.0; 1.0–1.35 → `((1.35-r)/0.35)^0.7`; >1.35 → 0.
+No below-MUF penalty any more (old 0.45–0.85 "below FOT" branch removed — it made
+good low-ratio paths look weak). Then × absorption × `kp_penalty = max(0, 1-(K/9)·0.75)`
+× antenna factor; cells ≤ 0.03 dropped.
+
+**Tuning notes (2026-09-27):** night floor 0.38 painted faint red over the whole
+night side on 20m; 0.30 killed 40m night short paths; 0.33 chosen. Constants were
+calibrated against typical band behavior, not ionosonde data — validating against
+Point Arguello (GIRO) or VOACAP is an open follow-up.
+
+**Skip circle (frontend `estimateSkipKm` in index.html):** mirrors the server math
+(`estimateFoF2`, `hopMFactor` — constants must stay in sync). For 24 bearings finds
+the shortest hop whose *midpoint* foF2 × M ≥ f (median MUF), circle = min over
+bearings, capped 3,500 km; returns 150 (no circle) when NVIS works. Using foF2 over
+the QTH instead gave a max-size circle at sunrise while the map showed the US open.
 
 **Band frequencies (`app.py → BAND_FREQS`):**
 ```
@@ -47,20 +62,20 @@ Peaks at 14:00 local solar time. Night floor is 45% of daytime peak.
 10m: 28.00–29.70 MHz
 ```
 
-**Cache:** 20m and 40m pre-warmed every 15 min by background thread. Other bands on-demand. Non-default antenna bypasses cache (`use_cache = antenna_type == 'vertical'`).
+**Cache:** 20m and 40m pre-warmed every 15 min by background thread. Heatmap LRU key
+includes UTC hour (not minute or SSN), so a cached map can be up to 1 h old.
 
-## Antenna model (`_antenna_factor` in `propagation.py`)
+## Antenna model (inside `calculate_muf_map`)
 
-Applied multiplicatively to base ionospheric strength after kp_penalty. Normalized so λ/4 vertical = 1.0. All antennas assume resonance and average ground (σ ≈ 5 mS/m).
+Applied multiplicatively after absorption and kp_penalty. Normalized so λ/4 vertical = 1.0. All antennas assume resonance and average ground (σ ≈ 5 mS/m).
 
-**Key helpers:**
-- `_bearing(lat1,lon1,lat2,lon2)` → true bearing 0–360° clockwise from north
-- `_takeoff_angle_deg(dist_km)` → geometric takeoff angle using 300 km F2 layer height; per-hop distance used for multi-hop paths; min 2°
+- True bearing station → cell computed inline (vectorized)
+- Takeoff angle = `elev` from `_hop_geometry` (curved earth, per-hop, min 3°)
 - `_EL_NORM = 0.394` — normalization so dipole at 0.5λ broadside gives factor ≈ 1.30
 
-**Vertical:**
+**Vertical (`_vertical_factor`):**
 - Omnidirectional; height_m ignored in UI (hidden when vertical selected)
-- h < 0.15λ → factor scales from 0.3 (efficiency loss)
+- h < 0.15λ → factor scales from 0.3 (efficiency loss) — e.g. 30 ft on 80m caps at ~0.46
 - 0.15–0.35λ (λ/4 sweet spot) → factor 1.0
 - > 0.35λ → factor tapers down (pattern shifts upward)
 
@@ -80,7 +95,7 @@ Applied multiplicatively to base ionospheric strength after kp_penalty. Normaliz
 - Same elevation model as dipole
 
 **Known limitations:**
-- Integer UTC hour — heatmap doesn't change within the same hour
-- Arithmetic interpolation (not true great-circle) — small errors at high latitudes on long E-W paths
-- No D-layer model (80m/40m real noise is higher than model suggests)
-- No sporadic-E, greyline, or transequatorial propagation
+- Single hop-count threshold (3,500 km) causes small strength steps where n changes
+- No sporadic-E, greyline enhancement, or transequatorial propagation
+- No noise/SNR model — strength is a probability-like openness score
+- Skip circle uses the median MUF; the map's 1.0–1.35 tail can show faint red inside it

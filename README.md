@@ -242,20 +242,24 @@ Same attributes as above, but `record_id` is a UTC timestamp string (e.g. `2026-
 
 Implemented in `propagation.py` with numpy-vectorized grid math; solar data is fetched with the stdlib `urllib`.
 
-**foF2** — empirical formula: `base = 0.01×SFI + 3.5`, tapered by latitude (cos^0.4) and a diurnal cosine peaking at 14:00 local time with a 45% nighttime floor.
+**Path geometry** — paths are split into equal hops of at most 3,500 km, with reflection points at the true great-circle hop midpoints.
 
-**MUF** — `foF2 × M-factor` (3.2 single-hop / 3.7 two-hop / 4.1 three-hop). Limited by the weakest hop along the path.
+**foF2** — daytime peak `3.0 + 0.055×SFI` (~8.6 MHz at SFI 100, typical of mid-latitude ionosondes), shaped by the solar zenith angle at each reflection point, so time of day, season and latitude all count. The F2 layer lags the sun by 1 h, and the night-time floor is 33% of the peak.
+
+**MUF** — `foF2 × M-factor`, where the M-factor comes from curved-earth hop geometry (300 km layer, 3° minimum takeoff): ~1 for short hops, ~3.4 for a 3,500 km hop. The weakest hop limits the path.
 
 **Strength curve** — probabilistic rather than a hard cutoff:
-- `< 0.45×MUF` → 0 (D-layer absorption)
-- `0.45–0.85×MUF` → rising from 0 (below FOT, noisy)
-- `0.85–1.0×MUF` → 1.0 (optimal range)
-- `1.0–1.35×MUF` → falling (above nominal MUF, variability)
+- `≤ 1.0×MUF` → 1.0 (path supported)
+- `1.0–1.35×MUF` → falling (above the median MUF; day-to-day variability)
 - `> 1.35×MUF` → 0 (closed)
+
+**D-layer absorption** — per hop, `677·(1+0.0037·SSN)·cos(χ)^0.75 / (f+1.4)² · M` dB (George–Bradley form), applied as `strength × 10^(−dB/40)`. This is why 80m/40m fade on long daytime paths while 20m stays open.
 
 **Geomagnetic penalty** — `1.0 − (K-index / 9) × 0.75` multiplied into all strengths.
 
-**Antenna factor** — normalized so λ/4 vertical = 1.0. Takeoff angle computed from F2 layer height (300 km) and per-hop path length. Azimuth and elevation patterns applied for dipole and hex beam.
+**Antenna factor** — normalized so λ/4 vertical = 1.0. Takeoff angle comes from the same curved-earth per-hop geometry. Azimuth and elevation patterns are applied for dipole and hex beam.
+
+**Skip circle** — the browser repeats the same foF2/M-factor math for 24 bearings and draws the shortest single-hop distance whose median MUF reaches the band.
 
 ---
 

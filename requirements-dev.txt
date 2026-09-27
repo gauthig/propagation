@@ -1,2 +1,3 @@
 # Dev-only tools — never packaged into lambda.zip
 ruff
+boto3   # provided by the Lambda runtime; needed only to run app.py locally

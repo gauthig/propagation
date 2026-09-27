@@ -671,10 +671,11 @@
     <div class="help-section">
       <h3>Propagation Model</h3>
       <ul>
-        <li><b>foF2</b> (critical frequency) is estimated from SFI, latitude, and local solar time using an empirical formula aligned with ITU/CCIR ionospheric tables.</li>
-        <li><b>MUF</b> = foF2 × M-factor. M-factor scales with hop count: 3.2 (1-hop, &lt;2,000 km), 3.7 (2-hop), 4.1 (3-hop).</li>
-        <li>Multi-hop paths are evaluated at each reflection point; the <b>weakest hop</b> limits the path MUF.</li>
-        <li>The nominal MUF is a <b>median estimate</b> — the band is open ~50 % of the time at exactly that frequency. The strength curve extends ±35 % around the MUF to model natural foF2 variability.</li>
+        <li><b>foF2</b> (critical frequency) is estimated from SFI and the sun's elevation at each reflection point — so time of day, season, and latitude all count — with the F2 layer lagging the sun by about an hour. Calibrated to typical mid-latitude ionosonde values (~8.5 MHz at midday, SFI 100).</li>
+        <li><b>MUF</b> = foF2 × M-factor, where the M-factor comes from curved-earth hop geometry: ~1 for short hops, rising to ~3.4 for a 3,500 km hop. Longer paths are split into equal hops.</li>
+        <li>Multi-hop paths are evaluated at each reflection point along the great-circle path; the <b>weakest hop</b> limits the path MUF.</li>
+        <li>The nominal MUF is a <b>median estimate</b> — the band is open ~50 % of the time at exactly that frequency. The strength curve extends 35 % above the MUF to model natural foF2 variability.</li>
+        <li><b>D-layer absorption</b> weakens each hop in daylight — strongest at low frequencies and high sun. This is why 80m/40m fade over long daytime paths while 20m stays open.</li>
         <li>Geomagnetic activity (K-index) applies a uniform penalty to all paths.</li>
       </ul>
     </div>
@@ -685,7 +686,7 @@
         <li><b>Vertical (baseline):</b> Omnidirectional. λ/4 height = factor 1.0. Shorter reduces efficiency; longer shifts the pattern upward.</li>
         <li><b>Dipole:</b> Figure-8 pattern broadside to the wire (sin² azimuth). Elevation pattern follows the ground-reflection lobe model F(θ) = |sin(π·h/λ·sin θ)|. Higher = better low-angle DX radiation.</li>
         <li><b>Hex Beam:</b> ±30° beamwidth, ~6 dBd forward gain, ~19 dB front-to-back. Valid on 20m–10m only (design frequency range). Same elevation model as dipole.</li>
-        <li>Takeoff angle per path is estimated geometrically from the F2 layer height (300 km) and per-hop distance.</li>
+        <li>Takeoff angle per path is estimated from curved-earth geometry using the F2 layer height (300 km) and per-hop distance (minimum 3°).</li>
         <li>All antennas assume resonance on the selected band and average ground (σ ≈ 5 mS/m).</li>
       </ul>
     </div>
@@ -703,16 +704,16 @@
       <h3>Color Scale</h3>
       <ul>
         <li><b style="color:#dc3c00">Red</b> — Very low probability. Band is marginal; natural variability may still allow contacts.</li>
-        <li><b style="color:#ff9000">Orange</b> — Below optimum frequency (below FOT). Noisy but workable.</li>
-        <li><b style="color:#ffd000">Yellow</b> — Good probability. Near or above the FOT.</li>
-        <li><b style="color:#8cff14">Lime / Green</b> — Prime operating range. Frequency is in the FOT–MUF window.</li>
+        <li><b style="color:#ff9000">Orange</b> — Marginal. Near the MUF edge or weakened by absorption. Noisy but workable.</li>
+        <li><b style="color:#ffd000">Yellow</b> — Good probability.</li>
+        <li><b style="color:#8cff14">Lime / Green</b> — Prime operating range. The ionosphere supports the path with little absorption.</li>
         <li>No color — Band closed at that path (ionosphere cannot support propagation).</li>
       </ul>
     </div>
 
     <div class="help-section">
       <h3>Skip Zone</h3>
-      <p>The gray dashed circle shows the estimated minimum skip distance — where your signal first returns to Earth. Locations inside this circle cannot be reached via skywave on the selected band.</p>
+      <p>The gray dashed circle shows the estimated minimum skip distance — where your signal first returns to Earth, in the most favorable direction. Locations inside it normally cannot be reached via skywave on the selected band (ground wave covers only the first few tens of km). Faint red inside the circle marks occasional openings when the ionosphere runs above its median. No circle means the band reaches all the way in (NVIS).</p>
     </div>
 
     <p class="help-note"><b>Disclaimer:</b> This is a simplified empirical model, not a full ray-tracing simulation (VOACAP, IONCAP, PROPLAB). It does not model D-layer absorption on 80m/40m, sporadic-E, transequatorial propagation, greyline effects, or actual ionospheric irregularities. Use it as a general guide, not a guarantee of band openings.</p>
@@ -1266,7 +1267,7 @@ function updateOverlay() {
 
   // Skip zone
   const freq   = BAND_FREQ[currentBand] || 14.175;
-  const skipKm = estimateSkipKm(freq, currentSFI);
+  const skipKm = estimateSkipKm(freq, qthLat, qthLon, currentSFI);
   if (skipKm > 300) {
     const skipGeo = geoCirclePath(skipKm, qthLon, qthLat);
     if (skipGeo) {
@@ -1295,10 +1296,57 @@ function updateOverlay() {
   }
 }
 
-function estimateSkipKm(freqMhz, sfi) {
-  const foF2 = Math.max(1.0, 0.01 * sfi + 3.5);
-  if (freqMhz <= foF2) return 150;
-  return Math.round(Math.min(2 * 300 * Math.sqrt((freqMhz/foF2)**2 - 1), 4500));
+// Mirrors the server model in propagation.py — keep the constants in sync.
+function estimateFoF2(lat, lon, sfi) {
+  const rad  = Math.PI / 180;
+  const now  = new Date();
+  const utcH = now.getUTCHours() + now.getUTCMinutes() / 60;
+  const doy  = Math.floor((now - Date.UTC(now.getUTCFullYear(), 0, 0)) / 86400000);
+  const decl = -23.44 * Math.cos(2 * Math.PI / 365 * (doy + 10)) * rad;
+  const ha   = ((((utcH + lon / 15 - 1) % 24) + 24) % 24 - 12) * 15 * rad;   // 1 h F2 lag
+  const cz   = Math.sin(lat * rad) * Math.sin(decl) + Math.cos(lat * rad) * Math.cos(decl) * Math.cos(ha);
+  return Math.max(1.0, (3.0 + 0.055 * sfi) * (0.33 + 0.67 * Math.sqrt(Math.max(cz, 0))));
+}
+
+// Curved-earth MUF M-factor for one F2 hop (300 km layer, 3° minimum takeoff angle)
+function hopMFactor(hopKm) {
+  const R = 6371, k = R / (R + 300);
+  const th   = hopKm / (2 * R);
+  const elev = Math.max(Math.atan2(Math.cos(th) - k, Math.sin(th)), 3 * Math.PI / 180);
+  const sinI = k * Math.cos(elev);
+  return 1 / Math.sqrt(1 - sinI * sinI);
+}
+
+// Point dKm from (lat, lon) along great-circle bearing brg (all degrees)
+function destPoint(lat, lon, brg, dKm) {
+  const rad = Math.PI / 180, d = dKm / 6371;
+  const la1 = lat * rad, b = brg * rad;
+  const la2 = Math.asin(Math.sin(la1) * Math.cos(d) + Math.cos(la1) * Math.sin(d) * Math.cos(b));
+  const lo2 = lon * rad + Math.atan2(Math.sin(b) * Math.sin(d) * Math.cos(la1),
+                                     Math.cos(d) - Math.sin(la1) * Math.sin(la2));
+  return [la2 / rad, lo2 / rad];
+}
+
+// Shortest single hop whose MUF reaches the band, in the most favourable direction.
+// foF2 is taken at each hop's midpoint (as the server does), not over the QTH —
+// at sunrise/sunset the ionosphere a few hundred km away can differ a lot.
+function estimateSkipKm(freqMhz, lat, lon, sfi) {
+  const supports = (brg, d) => {
+    const [mla, mlo] = destPoint(lat, lon, brg, d / 2);
+    return estimateFoF2(mla, mlo, sfi) * hopMFactor(d) >= freqMhz;
+  };
+  let best = 3500;
+  for (let brg = 0; brg < 360; brg += 15) {
+    if (!supports(brg, 3500)) continue;
+    if (supports(brg, 150)) return 150;
+    let lo = 150, hi = 3500;
+    for (let i = 0; i < 25; i++) {
+      const mid = (lo + hi) / 2;
+      if (supports(brg, mid)) hi = mid; else lo = mid;
+    }
+    best = Math.min(best, hi);
+  }
+  return Math.round(best);
 }
 
 // ── Heatmap canvas ────────────────────────────────────────────────────────

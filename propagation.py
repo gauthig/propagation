@@ -172,11 +172,52 @@ def _fetch_noaa():
 # el_raw at that geometry = |sin(π × 0.5 × sin(20°))| ≈ 0.512 → EL_NORM = 0.512 / 1.30
 _EL_NORM = 0.394
 
+_R_EARTH      = 6371.0   # km
+_F2_HEIGHT    = 300.0    # km — nominal F2 reflection height
+_MAX_HOP_KM   = 3500.0   # longest practical single F2 hop; longer paths split into equal hops
+_MIN_ELEV_DEG = 3.0      # lowest useful takeoff angle (terrain/ground losses below this)
+_F2_LAG_H     = 1.0      # F2 ionization lags the sun ~1 h → daily foF2 peak near 13:00 local
+_NIGHT_FLOOR  = 0.33     # night-time foF2 as a fraction of the daytime peak
+_GYRO_MHZ     = 1.4      # electron gyrofrequency term in the D-layer absorption formula
+_ABS_SCALE_DB = 40.0     # absorption dB that cuts strength by 10× (strength ∝ 10^(-dB/40))
+
 # Static 3° grid — fine enough for smooth heatmap rendering. Built once and reused
 # across every request; meshgrids are pure geometry and don't depend on solar/QTH.
 _LATS = np.arange(-75, 80, 3, dtype=float)
 _LONS = np.arange(-180, 180, 3, dtype=float)
 _LAT, _LON = np.meshgrid(_LATS, _LONS, indexing='ij')   # shape (52, 120)
+
+
+def _solar_declination(now):
+    """Sun declination in radians (cosine approximation, good to ~1°)."""
+    doy = now.timetuple().tm_yday
+    return np.radians(-23.44 * np.cos(2 * np.pi / 365.0 * (doy + 10)))
+
+
+def _cos_zenith(lat_r, lon_d, utc_h, decl, lag_h=0.0):
+    """cos(solar zenith angle) at lat (radians) / lon (degrees), optionally lagged by lag_h hours."""
+    hour_angle = np.radians(((utc_h + lon_d / 15.0 - lag_h) % 24 - 12) * 15)
+    return np.sin(lat_r) * np.sin(decl) + np.cos(lat_r) * np.cos(decl) * np.cos(hour_angle)
+
+
+def _hop_geometry(hop_km):
+    """Curved-earth takeoff angle (radians) and MUF M-factor for one F2 hop of hop_km."""
+    theta = hop_km / (2 * _R_EARTH)
+    k     = _R_EARTH / (_R_EARTH + _F2_HEIGHT)
+    elev  = np.maximum(np.arctan2(np.cos(theta) - k, np.sin(theta)), np.radians(_MIN_ELEV_DEG))
+    sin_i = k * np.cos(elev)                      # sine of incidence angle at the layer
+    return elev, 1.0 / np.sqrt(1.0 - sin_i ** 2)
+
+
+def _gc_point(la1, lo1, la2, lo2, delta, frac):
+    """Point at fraction frac along the great circle of angular length delta → (lat rad, lon deg)."""
+    sin_d = np.maximum(np.sin(delta), 1e-9)
+    a = np.sin((1 - frac) * delta) / sin_d
+    b = np.sin(frac * delta) / sin_d
+    x = a * np.cos(la1) * np.cos(lo1) + b * np.cos(la2) * np.cos(lo2)
+    y = a * np.cos(la1) * np.sin(lo1) + b * np.cos(la2) * np.sin(lo2)
+    z = a * np.sin(la1) + b * np.sin(la2)
+    return np.arctan2(z, np.hypot(x, y)), np.degrees(np.arctan2(y, x))
 
 
 def _vertical_factor(h_lam):
@@ -195,20 +236,23 @@ def calculate_muf_map(station_lat, station_lon, freq_min, freq_max, solar_indice
     Return list of [lat, lon, strength] (strength 0–1) for heatmap rendering.
     strength = 1 → band wide open; 0 → band closed.
 
-    Fully vectorized: every grid cell is evaluated in numpy array ops rather than
-    a Python double loop, so a full ~6,200-cell map is computed in one pass.
+    Vectorized: every grid cell is evaluated in numpy array ops; the only Python
+    loop is over hop index (≤6 for the longest great-circle paths).
     """
     if solar_indices is None:
         solar_indices = get_solar_indices()
 
-    sfi = float(solar_indices.get('SFI', 100))
+    sfi     = float(solar_indices.get('SFI', 100))
     k_index = float(solar_indices.get('K-index', 2))
+    ssn     = float(solar_indices.get('Sunspot Number', 50))
 
     # Geomagnetic disturbance reduces propagation quality
     kp_penalty = max(0.0, 1.0 - (k_index / 9.0) * 0.75)
 
     freq_center = (freq_min + freq_max) / 2.0
-    utc_hour = datetime.datetime.now(datetime.timezone.utc).hour
+    now   = datetime.datetime.now(datetime.timezone.utc)
+    utc_h = now.hour + now.minute / 60.0
+    decl  = _solar_declination(now)
 
     LAT, LON = _LAT, _LON
 
@@ -220,47 +264,43 @@ def calculate_muf_map(station_lat, station_lon, freq_min, freq_max, solar_indice
     dlat = la2 - la1
     dlon = lo2 - lo1
     a = np.sin(dlat / 2) ** 2 + np.cos(la1) * np.cos(la2) * np.sin(dlon / 2) ** 2
-    dist = 6371.0 * 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
+    dist  = _R_EARTH * 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
+    delta = dist / _R_EARTH   # angular path length (radians)
 
-    # ── Hop count / M-factor buckets by path length ───────────────────────────
-    near = dist < 2000        # 1 hop
-    mid  = (dist >= 2000) & (dist < 5000)   # 2 hops
-    m_factor = np.select([near, mid], [3.2, 3.7], default=4.1)  # default = far (≥5000 km, 3 hops)
+    # ── Hop count and curved-earth hop geometry ───────────────────────────────
+    n_hops = np.maximum(1, np.ceil(dist / _MAX_HOP_KM)).astype(int)
+    elev, m_factor = _hop_geometry(dist / n_hops)
 
-    # ── foF2 per hop midpoint; path MUF limited by the *weakest* (min) hop ────
-    base = 0.01 * sfi + 3.5   # daytime peak scales ~linearly with SFI
+    # ── foF2 and D-layer absorption at each hop midpoint (great-circle path) ──
+    # Daytime foF2 peak ≈ 8.6 MHz at SFI 100, matching typical mid-latitude ionosonde
+    # values. The sun's zenith angle at each reflection point sets the diurnal, seasonal
+    # and latitude shape (lagged ~1 h for F2). The weakest hop limits the path MUF.
+    # Absorption follows the George–Bradley form ∝ cos(χ)^0.75 / (f + fH)², per hop.
+    fof2_peak = 3.0 + 0.055 * sfi
+    abs_coeff = 677.0 * (1 + 0.0037 * ssn) / (freq_center + _GYRO_MHZ) ** 2
+    fof2      = np.full(dist.shape, np.inf)
+    loss_db   = np.zeros(dist.shape)
+    for i in range(int(n_hops.max())):
+        active     = i < n_hops
+        frac       = np.minimum((2 * i + 1) / (2.0 * n_hops), 1.0)
+        mlat, mlon = _gc_point(la1, lo1, la2, lo2, delta, frac)
+        cz_f2      = np.maximum(_cos_zenith(mlat, mlon, utc_h, decl, _F2_LAG_H), 0.0)
+        hop_fof2   = np.maximum(fof2_peak * (_NIGHT_FLOOR + (1 - _NIGHT_FLOOR) * np.sqrt(cz_f2)), 1.0)
+        fof2       = np.where(active, np.minimum(fof2, hop_fof2), fof2)
+        cz_d       = np.maximum(_cos_zenith(mlat, mlon, utc_h, decl), 0.0)
+        loss_db   += np.where(active, abs_coeff * cz_d ** 0.75 * m_factor, 0.0)
 
-    def fof2_at(f):
-        lat_mid = station_lat + f * (LAT - station_lat)
-        hour    = (utc_hour + (station_lon + f * (LON - station_lon)) / 15.0) % 24
-        lat_factor  = np.cos(np.radians(np.minimum(np.abs(lat_mid), 75))) ** 0.4
-        hour_angle  = np.radians((hour - 14) * 15)
-        time_factor = 0.45 + 0.55 * np.maximum(0.0, np.cos(hour_angle))
-        return np.maximum(base * lat_factor * time_factor, 1.0)
-
-    # Reuse f=0.5 across near+far; compute each fraction once over the full grid.
-    fof2_025, fof2_05, fof2_075 = fof2_at(0.25), fof2_at(0.5), fof2_at(0.75)
-    fof2_13, fof2_23 = fof2_at(1 / 3), fof2_at(2 / 3)
-    fof2 = np.select(
-        [near, mid],
-        [fof2_05, np.minimum(fof2_13, fof2_23)],
-        default=np.minimum(np.minimum(fof2_025, fof2_05), fof2_075),
-    )
-
-    muf = fof2 * m_factor
+    muf   = fof2 * m_factor
     ratio = freq_center / muf
 
-    # ── Probabilistic strength curve (see model notes) ────────────────────────
-    #   <0.45 → below LUF (absorbed); 0.45–0.85 → noisy/rising; 0.85–1.00 → prime;
-    #   1.00–1.35 → above MUF/falling; >1.35 → closed.  Clip power bases ≥0 so the
-    #   inactive branches never produce NaN from a negative fractional power.
-    above = np.power(np.clip((1.35 - ratio) / 0.35, 0, None), 0.7)
-    below = np.power(np.clip((ratio - 0.45) / 0.40, 0, None), 1.5)
-    strength = np.select(
-        [(ratio > 1.35) | (ratio < 0.45), ratio > 1.0, ratio >= 0.85],
-        [0.0, above, 1.0],
-        default=below,
-    )
+    # ── Strength curve (see model notes) ──────────────────────────────────────
+    #   ≤1.00 → supported; 1.00–1.35 → above median MUF, falling (day-to-day foF2
+    #   spread); >1.35 → closed. How far *below* the MUF says nothing about signal
+    #   level — low-band daytime loss comes from the absorption term instead.
+    #   Clip the power base ≥0 so the inactive branch never yields NaN.
+    above    = np.power(np.clip((1.35 - ratio) / 0.35, 0, None), 0.7)
+    strength = np.select([ratio > 1.35, ratio > 1.0], [0.0, above], default=1.0)
+    strength = strength * 10 ** (-loss_db / _ABS_SCALE_DB)
     strength = np.clip(strength * kp_penalty, 0.0, 1.0)
 
     # ── Antenna factor (vectorized) ───────────────────────────────────────────
@@ -275,12 +315,8 @@ def calculate_muf_map(station_lat, station_lon, freq_min, freq_max, solar_indice
         y = np.cos(la1) * np.sin(la2) - np.sin(la1) * np.cos(la2) * np.cos(dlon)
         bearing = (np.degrees(np.arctan2(x, y)) + 360) % 360
 
-        # F2 takeoff angle from per-hop geometry (300 km layer)
-        hop = np.where(near, dist, np.where(mid, dist / 2.0, dist / 3.0))
-        toa_rad = np.radians(np.maximum(2.0, np.degrees(np.arctan2(2.0 * 300.0, hop))))
-
-        # Elevation pattern from ground-reflection image theory
-        el_raw = np.maximum(np.abs(np.sin(np.pi * h_lam * np.sin(toa_rad))), 0.05)
+        # Elevation pattern from ground-reflection image theory, at the per-hop takeoff angle
+        el_raw = np.maximum(np.abs(np.sin(np.pi * h_lam * np.sin(elev))), 0.05)
         el_factor = el_raw / _EL_NORM
 
         if antenna_type == 'dipole':
